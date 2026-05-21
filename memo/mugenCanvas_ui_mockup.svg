@@ -1,0 +1,183 @@
+<svg width="1600" height="900" viewBox="0 0 1600 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="18" flood-color="#000000" flood-opacity="0.16"/>
+    </filter>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#000000" flood-opacity="0.12"/>
+    </filter>
+    <linearGradient id="topbar" x1="0" y1="0" x2="0" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#f2f3f5"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="0" y2="1" gradientUnits="objectBoundingBox">
+      <stop stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#f7f7f8"/>
+    </linearGradient>
+    <linearGradient id="colorSquare" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.48" stop-color="#e11d2f"/>
+      <stop offset="1" stop-color="#050505"/>
+    </linearGradient>
+    <linearGradient id="hue" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ff0033"/>
+      <stop offset="0.16" stop-color="#ff00ff"/>
+      <stop offset="0.32" stop-color="#003cff"/>
+      <stop offset="0.49" stop-color="#00ddff"/>
+      <stop offset="0.66" stop-color="#00ff4c"/>
+      <stop offset="0.83" stop-color="#ffff00"/>
+      <stop offset="1" stop-color="#ff2b00"/>
+    </linearGradient>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <rect width="24" height="24" fill="#f8f9fb"/>
+      <path d="M24 0H0V24" stroke="#edf0f2" stroke-width="1"/>
+    </pattern>
+    <style>
+      .jp { font-family: 'Noto Sans JP', 'Yu Gothic', 'Hiragino Sans', system-ui, sans-serif; }
+      .ui { font-family: Inter, 'Segoe UI', system-ui, sans-serif; }
+      .muted { fill: #6b7280; }
+      .text { fill: #1f2937; }
+      .line { stroke: #d8dce0; stroke-width: 1; }
+      .thin { stroke: #e6e8eb; stroke-width: 1; }
+      .red { stroke: #ff5a62; stroke-width: 1.4; }
+      .icon { stroke: #2f343a; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+      .window-title { font-size: 15px; font-weight: 700; letter-spacing: .02em; }
+      .small { font-size: 12px; }
+      .label { font-size: 13px; }
+    </style>
+  </defs>
+
+  <!-- app background -->
+  <rect width="1600" height="900" fill="#fafafa"/>
+  <rect x="0" y="56" width="1600" height="844" fill="url(#grid)" opacity="0.22"/>
+
+  <!-- top bar -->
+  <rect x="0" y="0" width="1600" height="56" fill="url(#topbar)" filter="url(#softShadow)"/>
+  <text x="30" y="35" class="ui text" font-size="22" font-weight="650">mugenCanvas</text>
+  <path d="M184 22h12l7 7-7 7h-12z" class="icon" opacity=".55"/>
+
+  <!-- left top icons -->
+  <g transform="translate(225 18)" opacity=".8">
+    <path d="M2 18V2h10l6 6v10H2z" class="icon"/><path d="M12 2v7h6" class="icon"/>
+  </g>
+  <g transform="translate(275 18)" opacity=".8"><path d="M2 18V6h7l3-4h10v16H2z" class="icon"/></g>
+  <g transform="translate(325 18)" opacity=".8"><path d="M3 4h16v16H3z" class="icon"/><path d="M6 1h16v16" class="icon" opacity=".6"/></g>
+  <g transform="translate(395 18)" opacity=".8"><path d="M19 7c-3-4-10-4-14 0L2 10l3 3c4 4 11 4 14 0" class="icon"/></g>
+  <g transform="translate(435 18)" opacity=".35"><path d="M2 7c3-4 10-4 14 0l3 3-3 3c-4 4-11 4-14 0" class="icon"/></g>
+
+  <!-- project title -->
+  <text x="800" y="23" text-anchor="middle" class="jp text" font-size="15" font-weight="700">新規プロジェクト</text>
+  <text x="800" y="42" text-anchor="middle" class="ui muted" font-size="13">1920 x 1080px / 24fps</text>
+
+  <!-- right controls -->
+  <g transform="translate(1220 14)">
+    <rect x="0" y="0" width="38" height="32" rx="8" fill="#fff" stroke="#d9dde2"/>
+    <path d="M15 9l11 7-11 7z" fill="#20242a"/>
+  </g>
+  <g transform="translate(1270 14)">
+    <circle cx="16" cy="16" r="10" stroke="#222" stroke-width="1.8"/><path d="M14 11l7 5-7 5z" fill="#222"/>
+  </g>
+  <rect x="1320" y="14" width="92" height="32" rx="8" fill="#fff" stroke="#d9dde2"/>
+  <text x="1340" y="35" class="ui text" font-size="14">100%</text><path d="M1390 25l6 6 6-6" stroke="#555" stroke-width="1.6" fill="none"/>
+  <g transform="translate(1445 18)" opacity=".75"><path d="M2 2h6v6H2zM14 2h6v6h-6zM2 14h6v6H2zM14 14h6v6h-6z" class="icon"/></g>
+  <g transform="translate(1490 18)" opacity=".75"><path d="M2 8V2h6M14 2h6v6M20 14v6h-6M8 20H2v-6" class="icon"/></g>
+  <g transform="translate(1535 18)" opacity=".75"><circle cx="11" cy="11" r="3" class="icon"/><path d="M11 1v3M11 18v3M1 11h3M18 11h3M4 4l2 2M16 16l2 2M18 4l-2 2M6 16l-2 2" class="icon"/></g>
+
+  <!-- central canvas -->
+  <g filter="url(#shadow)">
+    <rect x="395" y="145" width="720" height="450" fill="#ffffff" stroke="#e0e3e7"/>
+  </g>
+  <rect x="465" y="210" width="580" height="330" class="red"/>
+  <rect x="485" y="230" width="540" height="290" class="red" opacity=".75"/>
+  <path d="M755 170v56M755 520v64M425 375h56M1028 375h56" class="red"/>
+  <text x="755" y="626" text-anchor="middle" class="jp muted" font-size="13">無限キャンバス上に浮いた作画エリア / カメラトラック</text>
+
+  <!-- floating tool window -->
+  <g filter="url(#shadow)">
+    <rect x="42" y="140" width="150" height="500" rx="8" fill="url(#panel)" stroke="#dfe3e7"/>
+    <rect x="42" y="140" width="150" height="48" rx="8" fill="#ffffff"/>
+    <path d="M42 188H192" class="thin"/>
+    <text x="62" y="171" class="jp text window-title">ツールウィンドウ</text>
+    <text x="170" y="171" class="ui muted" font-size="18">×</text>
+
+    <!-- tool icons -->
+    <g transform="translate(58 204)">
+      <rect x="0" y="0" width="42" height="34" rx="6" fill="#fff" stroke="#e2e5e8"/><path d="M17 9l10 17-8-4-5 7-3-2 5-7-8-1z" fill="#20242a"/>
+      <rect x="0" y="44" width="42" height="34" rx="6" fill="#fff" stroke="#e2e5e8"/><path d="M21 52v18M12 61h18M15 55l-3 6 3 6M27 55l3 6-3 6" class="icon"/>
+      <rect x="0" y="88" width="42" height="34" rx="6" fill="#fff" stroke="#e2e5e8"/><path d="M14 112l4-14 10-5 3 3-5 10z" class="icon"/>
+      <rect x="0" y="132" width="42" height="34" rx="6" fill="#fff" stroke="#e2e5e8"/><path d="M13 157l14-14 4 4-14 14h-4z" class="icon"/>
+      <rect x="0" y="176" width="42" height="34" rx="6" fill="#fff" stroke="#e2e5e8"/><rect x="12" y="186" width="18" height="14" class="icon"/>
+      <rect x="0" y="220" width="42" height="34" rx="6" fill="#fff" stroke="#e2e5e8"/><path d="M14 228h16M22 228v18" class="icon"/>
+      <rect x="0" y="264" width="42" height="34" rx="6" fill="#fff" stroke="#e2e5e8"/><path d="M13 284v-8c0-3 4-3 4 0v6-10c0-3 4-3 4 0v9-7c0-3 4-3 4 0v9-5c0-3 4-3 4 0v8c0 7-5 10-10 10h-1c-5 0-9-4-9-9" class="icon"/>
+      <rect x="0" y="308" width="42" height="34" rx="6" fill="#fff" stroke="#e2e5e8"/><circle cx="19" cy="322" r="7" class="icon"/><path d="M25 328l7 7" class="icon"/>
+      <rect x="1" y="356" width="30" height="30" rx="4" fill="#0a0a0a"/><rect x="16" y="371" width="30" height="30" rx="4" fill="#fff" stroke="#dadde1"/>
+    </g>
+  </g>
+
+  <!-- brush color window -->
+  <g filter="url(#shadow)">
+    <rect x="1260" y="150" width="300" height="530" rx="8" fill="url(#panel)" stroke="#dfe3e7"/>
+    <rect x="1260" y="150" width="300" height="52" rx="8" fill="#ffffff"/>
+    <path d="M1260 202H1560" class="thin"/>
+    <text x="1280" y="183" class="jp text window-title">ブラシ・色ウィンドウ</text>
+    <text x="1538" y="183" class="ui muted" font-size="18">×</text>
+
+    <text x="1280" y="232" class="jp text label">カラー</text>
+    <text x="1350" y="232" class="jp muted label">スウォッチ</text>
+    <text x="1440" y="232" class="jp muted label">グラデーション</text>
+    <path d="M1280 242H1332" stroke="#111" stroke-width="2"/>
+    <rect x="1280" y="258" width="200" height="170" rx="5" fill="url(#colorSquare)"/>
+    <rect x="1495" y="258" width="28" height="170" rx="4" fill="url(#hue)"/>
+    <circle cx="1450" cy="278" r="4" stroke="#fff" stroke-width="1.5" fill="none"/>
+
+    <path d="M1280 456H1535" class="thin"/>
+    <text x="1280" y="488" class="jp text label">ブラシ設定</text>
+    <path d="M1304 528C1350 500 1396 558 1464 527" stroke="#111" stroke-width="3" fill="none" opacity=".85"/>
+    <text x="1280" y="580" class="jp muted label">サイズ</text>
+    <text x="1500" y="580" text-anchor="end" class="ui text" font-size="13">15 px</text>
+    <path d="M1285 600H1520" stroke="#d7dbe0" stroke-width="2"/><circle cx="1330" cy="600" r="7" fill="#fff" stroke="#adb3bb"/>
+    <text x="1280" y="635" class="jp muted label">不透明度</text>
+    <text x="1500" y="635" text-anchor="end" class="ui text" font-size="13">100%</text>
+    <path d="M1285 655H1520" stroke="#d7dbe0" stroke-width="2"/><circle cx="1490" cy="655" r="7" fill="#fff" stroke="#adb3bb"/>
+  </g>
+
+  <!-- floating timeline -->
+  <g filter="url(#shadow)">
+    <rect x="290" y="690" width="930" height="210" rx="8" fill="url(#panel)" stroke="#dfe3e7"/>
+    <rect x="290" y="690" width="930" height="48" rx="8" fill="#ffffff"/>
+    <path d="M290 738H1220" class="thin"/>
+    <text x="315" y="721" class="jp text window-title">タイムラインウィンドウ</text>
+    <text x="1190" y="721" class="ui muted" font-size="18">×</text>
+    <text x="315" y="764" class="jp text label">レイヤー</text>
+
+    <!-- layer list -->
+    <rect x="300" y="780" width="190" height="100" fill="#fafafa" stroke="#edf0f2"/>
+    <g class="jp text" font-size="13">
+      <text x="330" y="806">レイヤー 3</text>
+      <text x="330" y="835">レイヤー 2</text>
+      <text x="330" y="864">レイヤー 1</text>
+      <text x="330" y="893">背景</text>
+    </g>
+    <g stroke="#77808a" stroke-width="1.5" fill="none" opacity=".8">
+      <rect x="314" y="796" width="12" height="8"/><rect x="314" y="825" width="12" height="8"/><rect x="314" y="854" width="12" height="8"/><rect x="314" y="883" width="12" height="8"/>
+      <circle cx="456" cy="801" r="4"/><circle cx="456" cy="830" r="4"/><circle cx="456" cy="859" r="4"/><circle cx="456" cy="888" r="4"/>
+    </g>
+
+    <!-- frame area -->
+    <rect x="490" y="780" width="710" height="100" fill="#ffffff" stroke="#edf0f2"/>
+    <g stroke="#eef0f3" stroke-width="1">
+      <path d="M490 805H1200M490 830H1200M490 855H1200"/>
+      <path d="M550 780V880M610 780V880M670 780V880M730 780V880M790 780V880M850 780V880M910 780V880M970 780V880M1030 780V880M1090 780V880M1150 780V880"/>
+    </g>
+    <g class="ui muted" font-size="12">
+      <text x="500" y="765">1</text><text x="555" y="765">5</text><text x="615" y="765">10</text><text x="675" y="765">15</text><text x="735" y="765">20</text><text x="795" y="765">25</text><text x="855" y="765">30</text><text x="915" y="765">35</text><text x="975" y="765">40</text><text x="1035" y="765">45</text><text x="1095" y="765">50</text><text x="1155" y="765">60</text>
+    </g>
+    <rect x="494" y="754" width="20" height="20" rx="4" fill="#ff5360"/>
+    <text x="504" y="768" text-anchor="middle" class="ui" font-size="11" fill="#fff">1</text>
+    <path d="M504 774V880" stroke="#ff5360" stroke-width="2"/>
+  </g>
+
+  <!-- status text -->
+  <text x="28" y="885" class="ui muted" font-size="13">1920 x 1080px　24fps</text>
+  <text x="1515" y="885" text-anchor="end" class="jp muted" font-size="13">フレーム: 1/60　表示倍率: 100%</text>
+</svg>

@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+
+# Tauri build artifacts
+src-tauri/target/
+
+# Vite cache
+.vite/
+node_modules/.vite/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
