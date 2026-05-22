@@ -19,6 +19,8 @@ base64 = { version = "0.22", features = ["std"] }
 rayon = "1"
 rfd = "0.15"
 egui-phosphor = "0.7"
+openh264 = { version = "0.9", features = ["source"] }
+minimp4 = "0.1"
 
 [profile.dev]
 incremental = true

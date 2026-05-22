@@ -199,7 +199,7 @@ pub fn export_gif(
     Ok(())
 }
 
-// ─── MP4 export (requires ffmpeg in PATH) ─────────────────────────────────────
+// ─── MP4 export (pure Rust, no external tools required) ───────────────────────
 
 pub fn export_mp4(
     path: &str,
@@ -211,36 +211,53 @@ pub fn export_mp4(
     cam_w: u32, cam_h: u32,
     on_progress: impl Fn(u32, u32),
 ) -> Result<(), String> {
-    let tmp_dir = std::env::temp_dir().join("mugencanvas_mp4_export");
-    std::fs::create_dir_all(&tmp_dir).map_err(|e| format!("tmpdir作成失敗: {}", e))?;
+    use openh264::encoder::Encoder;
+    use openh264::formats::{RgbaSliceU8, YUVBuffer};
+    use minimp4::Mp4Muxer;
+
+    // H264 requires even dimensions
+    let enc_w = ((cam_w + 1) / 2) * 2;
+    let enc_h = ((cam_h + 1) / 2) * 2;
+
+    let mut encoder = Encoder::new()
+        .map_err(|e| format!("H264エンコーダー初期化失敗: {}", e))?;
 
     let count = end_frame.saturating_sub(start_frame) + 1;
+    let mut h264_data: Vec<u8> = Vec::new();
+
     for frame in start_frame..=end_frame {
         on_progress(frame - start_frame + 1, count);
         let rgba = canvas.export_region(layers, frame, cam_x, cam_y, cam_w, cam_h);
-        let png = rgba_to_png(&rgba, cam_w, cam_h)
-            .map_err(|e| format!("PNG encode frame {}: {}", frame, e))?;
-        let fname = tmp_dir.join(format!("frame_{:04}.png", frame - start_frame + 1));
-        std::fs::write(&fname, &png).map_err(|e| format!("write frame {}: {}", frame, e))?;
+
+        // Pad to even dimensions if needed
+        let rgba_enc = if enc_w != cam_w || enc_h != cam_h {
+            let mut padded = vec![0u8; (enc_w * enc_h * 4) as usize];
+            for y in 0..cam_h as usize {
+                let src = &rgba[y * cam_w as usize * 4..(y + 1) * cam_w as usize * 4];
+                let dst_off = y * enc_w as usize * 4;
+                padded[dst_off..dst_off + cam_w as usize * 4].copy_from_slice(src);
+            }
+            padded
+        } else {
+            rgba
+        };
+
+        let yuv = YUVBuffer::from_rgb_source(
+            RgbaSliceU8::new(&rgba_enc, (enc_w as usize, enc_h as usize))
+        );
+        let bitstream = encoder.encode(&yuv)
+            .map_err(|e| format!("フレーム{}のエンコード失敗: {}", frame, e))?;
+        h264_data.extend_from_slice(&bitstream.to_vec());
     }
 
-    let input_pat = tmp_dir.join("frame_%04d.png");
-    let status = std::process::Command::new("ffmpeg")
-        .arg("-y")
-        .arg("-r").arg(fps.to_string())
-        .arg("-i").arg(input_pat.to_str().unwrap_or(""))
-        .arg("-c:v").arg("libx264")
-        .arg("-pix_fmt").arg("yuv420p")
-        .arg(path)
-        .status();
+    let file = std::fs::File::create(path)
+        .map_err(|e| format!("ファイル作成失敗: {}", e))?;
+    let mut muxer = Mp4Muxer::new(file);
+    muxer.init_video(enc_w as i32, enc_h as i32, false, "mugenCanvas");
+    muxer.write_video_with_fps(&h264_data, fps);
+    muxer.close();
 
-    let _ = std::fs::remove_dir_all(&tmp_dir);
-
-    match status {
-        Ok(s) if s.success() => Ok(()),
-        Ok(_) => Err("ffmpegがエラーで終了しました".to_string()),
-        Err(e) => Err(format!("ffmpeg起動失敗 (ffmpegをインストールしてPATHに追加してください): {}", e)),
-    }
+    Ok(())
 }
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
