@@ -1,5 +1,6 @@
 use egui::{Ui, Color32, RichText};
 use crate::canvas::CanvasState;
+use crate::canvas::camera::get_camera_at_frame;
 use crate::state::AppState;
 
 /// Returns (dirty, layer_removed_id)
@@ -75,6 +76,37 @@ pub fn show(ui: &mut Ui, state: &mut AppState, canvas: &mut CanvasState) -> (boo
     if let Some(ref id) = removed {
         canvas.remove_layer(id);
         state.remove_layer(id);
+    }
+
+    // ── Camera section ────────────────────────────────────────────────────────
+    ui.separator();
+    ui.heading("カメラ");
+    let frame = state.current_frame;
+    let kf = get_camera_at_frame(&state.project.camera_track.keyframes, frame);
+    let is_keyframe_here = state.project.camera_track.keyframes.iter().any(|k| k.frame == frame);
+
+    ui.label(RichText::new(format!("位置  ({:.0}, {:.0})", kf.x, kf.y)).size(11.0));
+    ui.label(RichText::new(format!("サイズ {:.0}×{:.0}", kf.width, kf.height)).size(11.0));
+    ui.add_space(2.0);
+
+    if is_keyframe_here {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("◆ キーフレーム").size(11.0).color(Color32::from_rgb(220, 140, 30)));
+            if ui.small_button("削除").clicked() {
+                if state.project.camera_track.keyframes.len() > 1 {
+                    state.project.camera_track.keyframes.retain(|k| k.frame != frame);
+                    dirty = true;
+                }
+            }
+        });
+    } else {
+        if ui.button("+ キーフレーム挿入").clicked() {
+            let mut new_kf = kf.clone();
+            new_kf.frame = frame;
+            state.project.camera_track.keyframes.push(new_kf);
+            state.project.camera_track.keyframes.sort_by_key(|k| k.frame);
+            dirty = true;
+        }
     }
 
     (dirty, removed)

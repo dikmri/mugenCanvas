@@ -96,6 +96,40 @@ pub fn export_png(
     std::fs::write(path, &png).map_err(|e| e.to_string())
 }
 
+// ─── Sequential PNG export ────────────────────────────────────────────────────
+
+pub fn export_png_sequence(
+    dir: &str,
+    canvas: &CanvasState,
+    layers: &[crate::model::AnimationLayer],
+    total_frames: u32,
+    cam_x: f32, cam_y: f32,
+    cam_w: u32, cam_h: u32,
+    on_progress: impl Fn(u32, u32) + Send + Sync,
+) -> Result<(), String> {
+    use rayon::prelude::*;
+
+    // Phase 1: render + encode all frames in parallel
+    let pngs: Vec<(u32, Vec<u8>)> = (1..=total_frames)
+        .into_par_iter()
+        .map(|frame| -> Result<(u32, Vec<u8>), String> {
+            on_progress(frame, total_frames);
+            let rgba = canvas.export_region(layers, frame, cam_x, cam_y, cam_w, cam_h);
+            let png = rgba_to_png(&rgba, cam_w, cam_h)
+                .map_err(|e| format!("PNG encode frame {}: {}", frame, e))?;
+            Ok((frame, png))
+        })
+        .collect::<Result<_, _>>()?;
+
+    // Phase 2: write files sequentially
+    for (frame, png) in pngs {
+        let path = format!("{}/frame_{:04}.png", dir, frame);
+        std::fs::write(&path, &png).map_err(|e| format!("write {}: {}", path, e))?;
+    }
+
+    Ok(())
+}
+
 // ─── GIF export ───────────────────────────────────────────────────────────────
 
 pub fn export_gif(

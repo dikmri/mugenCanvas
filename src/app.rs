@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use egui::{Color32, Context, Key, Pos2, Rect, Sense};
@@ -37,6 +38,14 @@ pub struct MugenCanvasApp {
     // Export / status
     status_msg: Option<(String, Instant)>,
     gif_exporting: bool,
+
+    // Frame clipboard (Ctrl+C / Ctrl+V)
+    frame_clipboard: Option<HashMap<(i32, i32), Vec<u8>>>,
+
+    // Camera tool drag state
+    is_camera_dragging: bool,
+    camera_drag_world_start: (f32, f32),
+    camera_drag_kf_start: Option<crate::model::CameraKeyframe>,
 }
 
 impl MugenCanvasApp {
@@ -64,6 +73,10 @@ impl MugenCanvasApp {
             last_frame_time: None,
             status_msg: None,
             gif_exporting: false,
+            frame_clipboard: None,
+            is_camera_dragging: false,
+            camera_drag_world_start: (0.0, 0.0),
+            camera_drag_kf_start: None,
         }
     }
 
@@ -87,6 +100,8 @@ impl MugenCanvasApp {
             if ctrl && !shift && i.key_pressed(Key::R) { self.state.viewport.rotation = 0.0; self.dirty = true; }
             if ctrl && !shift && i.key_pressed(Key::E) { self.state.viewport.rotation += 20.0_f32.to_radians(); self.dirty = true; }
             if ctrl && !shift && i.key_pressed(Key::Q) { self.state.viewport.rotation -= 20.0_f32.to_radians(); self.dirty = true; }
+            if ctrl && !shift && i.key_pressed(Key::C) { self.do_copy_frame(); }
+            if ctrl && !shift && i.key_pressed(Key::V) { self.do_paste_frame(); }
 
             // Tool shortcuts (no modifier)
             if !ctrl && !shift {
@@ -259,6 +274,14 @@ impl MugenCanvasApp {
                     self.is_panning = true;
                     self.pan_start_pointer = i.pointer.hover_pos().unwrap_or(panel_rect.center());
                     self.pan_start_offset = (self.state.viewport.offset_x, self.state.viewport.offset_y);
+                } else if self.state.selected_tool == Tool::Camera {
+                    if let Some((lx, ly)) = local_pos {
+                        let (wx, wy) = pointer_to_world(lx, ly, panel_w, panel_h, &self.state.viewport);
+                        let kf = get_camera_at_frame(&self.state.project.camera_track.keyframes, self.state.current_frame);
+                        self.is_camera_dragging = true;
+                        self.camera_drag_world_start = (wx, wy);
+                        self.camera_drag_kf_start = Some(kf);
+                    }
                 } else if self.state.selected_tool == Tool::Zoom {
                     if let Some((lx, ly)) = local_pos {
                         let cx = panel_w / 2.0; let cy = panel_h / 2.0;
@@ -303,7 +326,20 @@ impl MugenCanvasApp {
             }
 
             if primary_down {
-                if self.is_panning {
+                if self.is_camera_dragging {
+                    if let Some((lx, ly)) = local_pos {
+                        if let Some(ref kf_start) = self.camera_drag_kf_start.clone() {
+                            let (wx, wy) = pointer_to_world(lx, ly, panel_w, panel_h, &self.state.viewport);
+                            let dx = (wx - self.camera_drag_world_start.0) as f64;
+                            let dy = (wy - self.camera_drag_world_start.1) as f64;
+                            let new_x = kf_start.x + dx;
+                            let new_y = kf_start.y + dy;
+                            let frame = self.state.current_frame;
+                            self.upsert_camera_kf_pos(frame, new_x, new_y);
+                            self.dirty = true;
+                        }
+                    }
+                } else if self.is_panning {
                     self.state.viewport.offset_x += pointer_delta.x;
                     self.state.viewport.offset_y += pointer_delta.y;
                     self.dirty = true;
@@ -326,6 +362,8 @@ impl MugenCanvasApp {
             if primary_released {
                 self.is_painting = false;
                 self.is_panning = false;
+                self.is_camera_dragging = false;
+                self.camera_drag_kf_start = None;
                 self.last_paint_pos = None;
             }
         });
@@ -443,6 +481,70 @@ impl MugenCanvasApp {
         }
     }
 
+    fn upsert_camera_kf_pos(&mut self, frame: u32, x: f64, y: f64) {
+        let interp = get_camera_at_frame(&self.state.project.camera_track.keyframes, frame);
+        let kfs = &mut self.state.project.camera_track.keyframes;
+        if let Some(existing) = kfs.iter_mut().find(|k| k.frame == frame) {
+            existing.x = x;
+            existing.y = y;
+        } else {
+            let mut new_kf = interp;
+            new_kf.frame = frame;
+            new_kf.x = x;
+            new_kf.y = y;
+            kfs.push(new_kf);
+            kfs.sort_by_key(|k| k.frame);
+        }
+    }
+
+    fn do_copy_frame(&mut self) {
+        let layer_id = self.state.selected_layer_id.clone();
+        let frame = self.state.current_frame;
+        self.frame_clipboard = Some(self.canvas.snapshot_tiles(&layer_id, frame));
+        self.show_status(format!("フレーム {} をコピーしました", frame));
+    }
+
+    fn do_paste_frame(&mut self) {
+        let clipboard = match self.frame_clipboard.clone() {
+            Some(c) => c,
+            None => { self.show_status("クリップボードが空です"); return; }
+        };
+        if !self.state.can_paint() {
+            self.show_status("このフレームには貼り付けできません（ロック or コマ）");
+            return;
+        }
+        let layer_id = self.state.selected_layer_id.clone();
+        let frame = self.state.current_frame;
+        let snap = self.canvas.snapshot_tiles(&layer_id, frame);
+        self.undo.snapshot(snap, &layer_id, frame);
+        self.canvas.restore_tiles(&layer_id, frame, clipboard);
+        self.state.mark_frame_drawn(&layer_id, frame);
+        self.dirty = true;
+        self.show_status(format!("フレーム {} に貼り付けました", frame));
+    }
+
+    fn do_export_png_sequence(&mut self) {
+        let dir = match rfd::FileDialog::new()
+            .set_title("連番PNG書き出し先フォルダを選択")
+            .pick_folder()
+        {
+            Some(p) => p.to_string_lossy().to_string(),
+            None => return,
+        };
+        let kf = get_camera_at_frame(&self.state.project.camera_track.keyframes, 1);
+        let layers = self.state.project.layers.clone();
+        let total = self.state.project.settings.total_frames;
+        let (cam_x, cam_y, cam_w, cam_h) = (kf.x as f32, kf.y as f32, kf.width as u32, kf.height as u32);
+
+        self.show_status("連番PNG書き出し中...");
+        match io::export_png_sequence(&dir, &self.canvas, &layers, total, cam_x, cam_y, cam_w, cam_h, |cur, tot| {
+            eprintln!("[PNG seq] frame {}/{}", cur, tot);
+        }) {
+            Ok(()) => self.show_status(format!("連番PNG書き出し完了 ({} フレーム) → {}", total, dir)),
+            Err(e) => self.show_status(format!("連番PNG書き出し失敗: {}", e)),
+        }
+    }
+
     fn do_export_gif(&mut self) {
         if self.gif_exporting { return; }
         let path = match rfd::FileDialog::new()
@@ -524,6 +626,7 @@ impl eframe::App for MugenCanvasApp {
                 TopbarAction::Open => self.do_open(),
                 TopbarAction::Save => self.do_save(),
                 TopbarAction::ExportPng => self.do_export_png(),
+                TopbarAction::ExportPngSequence => self.do_export_png_sequence(),
                 TopbarAction::ExportGif => self.do_export_gif(),
                 TopbarAction::Undo => self.do_undo(),
                 TopbarAction::Redo => self.do_redo(),

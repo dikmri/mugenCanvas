@@ -1,5 +1,6 @@
 use egui::{Ui, Color32, RichText, Stroke};
 use egui_phosphor::regular as ph;
+use crate::canvas::camera::get_camera_at_frame;
 use crate::state::AppState;
 
 /// Returns (frame_changed, hold_set, hold_released)
@@ -47,14 +48,49 @@ pub fn show(ui: &mut Ui, state: &mut AppState) -> bool {
     let header_w = 80.0;
 
     egui::ScrollArea::horizontal().id_salt("timeline_scroll").show(ui, |ui| {
-        let layers = &state.project.layers;
         let current = state.current_frame;
         let sel_layer_id = state.selected_layer_id.clone();
 
         let mut new_frame: Option<u32> = None;
         let mut hold_set: Option<(String, u32)> = None;
         let mut hold_released: Option<(String, u32)> = None;
+        let mut cam_kf_add: Option<u32> = None;
+        let mut cam_kf_remove: Option<u32> = None;
 
+        // ── Camera track row ──────────────────────────────────────────────────
+        ui.horizontal(|ui| {
+            ui.add_sized([header_w - 22.0, row_h], egui::Label::new(
+                RichText::new("カメラ").size(11.0)
+            ));
+            let has_kf_here = state.project.camera_track.keyframes.iter().any(|k| k.frame == current);
+            if ui.add_sized([20.0, row_h], egui::Button::new(if has_kf_here { "−" } else { "+" }))
+                .on_hover_text(if has_kf_here { "キーフレーム削除" } else { "キーフレーム挿入" })
+                .clicked()
+            {
+                if has_kf_here { cam_kf_remove = Some(current); } else { cam_kf_add = Some(current); }
+            }
+
+            for f in 1..=total {
+                let is_kf = state.project.camera_track.keyframes.iter().any(|k| k.frame == f);
+                let is_current = f == current;
+                let fill = if is_current {
+                    Color32::from_rgb(60, 140, 220)
+                } else if is_kf {
+                    Color32::from_rgb(220, 140, 30)
+                } else {
+                    Color32::from_gray(25)
+                };
+                let resp = draw_frame_cell(ui, frame_w, row_h, fill, Color32::TRANSPARENT, is_kf, false);
+                if resp.clicked() { new_frame = Some(f); }
+                if resp.secondary_clicked() {
+                    if is_kf { cam_kf_remove = Some(f); } else { cam_kf_add = Some(f); }
+                }
+            }
+        });
+        ui.separator();
+
+        // ── Layer rows ────────────────────────────────────────────────────────
+        let layers = &state.project.layers;
         for layer in layers.iter().rev() {
             ui.horizontal(|ui| {
                 // Layer name column
@@ -97,6 +133,19 @@ pub fn show(ui: &mut Ui, state: &mut AppState) -> bool {
         if let Some(f) = new_frame { state.set_frame(f); dirty = true; }
         if let Some((lid, f)) = hold_set { state.set_koma_hold(f, &lid); dirty = true; }
         if let Some((lid, f)) = hold_released { state.release_koma_hold(f, &lid); dirty = true; }
+        if let Some(f) = cam_kf_add {
+            let mut new_kf = get_camera_at_frame(&state.project.camera_track.keyframes, f);
+            new_kf.frame = f;
+            state.project.camera_track.keyframes.push(new_kf);
+            state.project.camera_track.keyframes.sort_by_key(|k| k.frame);
+            dirty = true;
+        }
+        if let Some(f) = cam_kf_remove {
+            if state.project.camera_track.keyframes.len() > 1 {
+                state.project.camera_track.keyframes.retain(|k| k.frame != f);
+                dirty = true;
+            }
+        }
     });
 
     dirty
