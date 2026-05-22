@@ -21,6 +21,8 @@ rfd = "0.15"
 egui-phosphor = "0.7"
 openh264 = { version = "0.9", features = ["source"] }
 minimp4 = "0.1"
+ureq = "3"
+self-replace = "1"
 
 [profile.dev]
 incremental = true

@@ -7,6 +7,7 @@ mod model;
 mod state;
 mod ui;
 mod undo;
+mod updater;
 
 fn main() -> eframe::Result<()> {
     setup_crash_logging();

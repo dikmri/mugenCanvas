@@ -13,10 +13,11 @@ pub enum TopbarAction {
     Undo,
     Redo,
     ToggleGrid,
+    CheckUpdate,
     None,
 }
 
-pub fn show(ui: &mut Ui, state: &mut AppState, can_undo: bool, can_redo: bool) -> TopbarAction {
+pub fn show(ui: &mut Ui, state: &mut AppState, can_undo: bool, can_redo: bool, update_available: bool) -> TopbarAction {
     let mut action = TopbarAction::None;
 
     ui.horizontal(|ui| {
@@ -38,6 +39,24 @@ pub fn show(ui: &mut Ui, state: &mut AppState, can_undo: bool, can_redo: bool) -
         if ui.button(ph::IMAGES).on_hover_text("連番PNG書き出し (フレーム範囲指定)").clicked()    { action = TopbarAction::ExportPngSequence; }
         if ui.button(ph::FILM_STRIP).on_hover_text("GIFアニメーション書き出し (フレーム範囲指定)").clicked() { action = TopbarAction::ExportGif; }
         if ui.button(ph::VIDEO_CAMERA).on_hover_text("MP4動画書き出し (フレーム範囲指定)").clicked() { action = TopbarAction::ExportMp4; }
+        ui.separator();
+
+        let update_color = if update_available {
+            egui::Color32::from_rgb(60, 220, 120)
+        } else {
+            ui.visuals().text_color()
+        };
+        let update_tip = if update_available {
+            "新しいバージョンがあります — クリックして更新"
+        } else {
+            "アップデートを確認"
+        };
+        if ui.add(egui::Button::new(egui::RichText::new(ph::ARROW_CIRCLE_UP).color(update_color)))
+            .on_hover_text(update_tip)
+            .clicked()
+        {
+            action = TopbarAction::CheckUpdate;
+        }
         ui.separator();
 
         let grid_icon = if state.show_grid { ph::GRID_FOUR } else { ph::GRID_FOUR };

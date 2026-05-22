@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use egui::{Color32, Context, Key, Pos2, Rect, Sense};
@@ -75,6 +76,11 @@ pub struct MugenCanvasApp {
 
     // Stylus pressure (0.0–1.0, default 1.0 when no touch/pen event)
     current_pressure: f32,
+
+    // Auto-update
+    update_check_rx: Arc<Mutex<Option<crate::updater::CheckResult>>>,
+    update_pending: Option<crate::updater::UpdateInfo>,
+    update_dialog: crate::updater::UpdateDialog,
 }
 
 impl MugenCanvasApp {
@@ -92,6 +98,11 @@ impl MugenCanvasApp {
         }
         let mut canvas = CanvasState::default();
         canvas.set_canvas_size(state.project.settings.width, state.project.settings.height);
+        // Start background update check
+        let update_check_rx: Arc<Mutex<Option<crate::updater::CheckResult>>> =
+            Arc::new(Mutex::new(None));
+        crate::updater::spawn_check(update_check_rx.clone());
+
         Self {
             state,
             canvas,
@@ -120,11 +131,196 @@ impl MugenCanvasApp {
             camera_resize_world_start: (0.0, 0.0),
             camera_resize_kf_start: None,
             current_pressure: 1.0,
+            update_check_rx,
+            update_pending: None,
+            update_dialog: crate::updater::UpdateDialog::Hidden,
         }
     }
 
     fn show_status(&mut self, msg: impl Into<String>) {
         self.status_msg = Some((msg.into(), Instant::now()));
+    }
+
+    // ─── Auto-update ─────────────────────────────────────────────────────────
+
+    fn do_check_update(&mut self) {
+        use crate::updater::UpdateDialog as UD;
+        if let Some(info) = self.update_pending.clone() {
+            // Already have a found update — just re-show the dialog
+            self.update_dialog = UD::Available(info);
+            return;
+        }
+        if matches!(self.update_dialog, UD::Checking) {
+            return; // already in progress
+        }
+        let rx = Arc::new(Mutex::new(None));
+        self.update_check_rx = rx.clone();
+        crate::updater::spawn_check(rx);
+        self.update_dialog = UD::Checking;
+    }
+
+    fn poll_update(&mut self, ctx: &Context) {
+        use crate::updater::UpdateDialog as UD;
+
+        // Consume check result
+        let result = self.update_check_rx.lock().unwrap().take();
+        if let Some(r) = result {
+            match (&self.update_dialog, r) {
+                // Startup silent check found update → show dialog automatically
+                (UD::Hidden, Ok(Some(info))) => {
+                    self.update_pending = Some(info.clone());
+                    self.update_dialog = UD::Available(info);
+                }
+                // Manual check results
+                (UD::Checking, Ok(Some(info))) => {
+                    self.update_pending = Some(info.clone());
+                    self.update_dialog = UD::Available(info);
+                }
+                (UD::Checking, Ok(None)) => {
+                    self.update_dialog = UD::NotFound;
+                }
+                (UD::Checking, Err(e)) => {
+                    self.update_dialog = UD::Error(e);
+                }
+                _ => {}
+            }
+        }
+
+        // Poll apply progress
+        if let UD::Applying(ref arc) = self.update_dialog {
+            let finished = arc.lock().unwrap().finished.clone();
+            if let Some(result) = finished {
+                match result {
+                    Ok(()) => {
+                        self.update_dialog = UD::Done(Instant::now());
+                    }
+                    Err(e) => {
+                        self.update_dialog = UD::Error(e);
+                    }
+                }
+            }
+        }
+
+        // Relaunch after Done shown briefly
+        if let UD::Done(at) = self.update_dialog {
+            if at.elapsed() >= Duration::from_millis(800) {
+                if let Ok(exe) = std::env::current_exe() {
+                    let _ = std::process::Command::new(exe).spawn();
+                }
+                std::process::exit(0);
+            }
+            ctx.request_repaint_after(Duration::from_millis(100));
+        }
+
+        // Keep repainting while active
+        if matches!(self.update_dialog, UD::Checking | UD::Applying(_)) {
+            ctx.request_repaint_after(Duration::from_millis(150));
+        }
+    }
+
+    fn show_update_dialog(&mut self, ctx: &Context) {
+        use crate::updater::{ApplyState, UpdateDialog as UD};
+
+        if matches!(self.update_dialog, UD::Hidden) {
+            return;
+        }
+
+        let mut open = true;
+        egui::Window::new("アップデート")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .open(&mut open)
+            .show(ctx, |ui| {
+                ui.set_min_width(320.0);
+
+                match &self.update_dialog {
+                    UD::Checking => {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label("更新を確認中...");
+                        });
+                    }
+
+                    UD::Available(info) => {
+                        let version = info.version.clone();
+                        ui.label(format!("新しいバージョン v{} があります。", version));
+                        ui.label(format!("現在のバージョン: v{}", env!("CARGO_PKG_VERSION")));
+                        ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            if ui.button("今すぐ更新").clicked() {
+                                if let Some(info) = self.update_pending.clone() {
+                                    let state = Arc::new(Mutex::new(ApplyState {
+                                        downloaded: 0,
+                                        total: 0,
+                                        finished: None,
+                                    }));
+                                    crate::updater::spawn_apply(info, state.clone());
+                                    self.update_dialog = UD::Applying(state);
+                                }
+                            }
+                            if ui.button("あとで").clicked() {
+                                self.update_dialog = UD::Hidden;
+                            }
+                        });
+                    }
+
+                    UD::Applying(arc) => {
+                        let (dl, total) = {
+                            let s = arc.lock().unwrap();
+                            (s.downloaded, s.total)
+                        };
+                        ui.label("ダウンロード中...");
+                        ui.add_space(4.0);
+                        if total > 0 {
+                            let progress = dl as f32 / total as f32;
+                            ui.add(
+                                egui::ProgressBar::new(progress)
+                                    .show_percentage()
+                                    .desired_width(280.0),
+                            );
+                            ui.label(format!(
+                                "{:.1} / {:.1} MB",
+                                dl as f64 / 1_048_576.0,
+                                total as f64 / 1_048_576.0
+                            ));
+                        } else {
+                            ui.spinner();
+                        }
+                    }
+
+                    UD::Done(_) => {
+                        ui.label("✓ 更新完了。再起動中...");
+                    }
+
+                    UD::NotFound => {
+                        ui.label(format!(
+                            "✓ 最新版です (v{})。",
+                            env!("CARGO_PKG_VERSION")
+                        ));
+                        ui.add_space(4.0);
+                        if ui.button("閉じる").clicked() {
+                            self.update_dialog = UD::Hidden;
+                        }
+                    }
+
+                    UD::Error(e) => {
+                        let msg = e.clone();
+                        ui.colored_label(egui::Color32::from_rgb(220, 80, 80), &msg);
+                        ui.add_space(4.0);
+                        if ui.button("閉じる").clicked() {
+                            self.update_dialog = UD::Hidden;
+                        }
+                    }
+
+                    UD::Hidden => {}
+                }
+            });
+
+        // Window's X button
+        if !open {
+            self.update_dialog = UD::Hidden;
+        }
     }
 
     // ─── Keyboard shortcuts ──────────────────────────────────────────────────
@@ -852,6 +1048,9 @@ impl eframe::App for MugenCanvasApp {
         // Handle playback timer
         self.handle_playback(ctx);
 
+        // Poll background update check / apply progress
+        self.poll_update(ctx);
+
         // Handle keyboard shortcuts (only when no text input has focus)
         if !ctx.wants_keyboard_input() {
             self.handle_shortcuts(ctx);
@@ -859,9 +1058,11 @@ impl eframe::App for MugenCanvasApp {
 
         // ── Top bar ───────────────────────────────────────────────────────────
         egui::TopBottomPanel::top("topbar").show(ctx, |ui| {
+            let update_available = self.update_pending.is_some();
             let action = crate::ui::topbar::show(
                 ui, &mut self.state,
                 self.undo.can_undo(), self.undo.can_redo(),
+                update_available,
             );
             match action {
                 TopbarAction::New => self.do_new(),
@@ -874,9 +1075,13 @@ impl eframe::App for MugenCanvasApp {
                 TopbarAction::Undo => self.do_undo(),
                 TopbarAction::Redo => self.do_redo(),
                 TopbarAction::ToggleGrid => { self.state.show_grid = !self.state.show_grid; self.dirty = true; }
+                TopbarAction::CheckUpdate => self.do_check_update(),
                 TopbarAction::None => {}
             }
         });
+
+        // ── Update dialog ─────────────────────────────────────────────────────
+        self.show_update_dialog(ctx);
 
         // ── Export dialog (modal overlay) ─────────────────────────────────────
         self.show_export_dialog(ctx);
