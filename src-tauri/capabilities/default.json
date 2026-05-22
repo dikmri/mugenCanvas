@@ -1,8 +1,0 @@
-{
-  "identifier": "default",
-  "description": "Default capabilities for mugenCanvas main window",
-  "windows": ["main"],
-  "permissions": [
-    "core:default"
-  ]
-}

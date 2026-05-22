@@ -1,0 +1,68 @@
+use egui::{Ui, RichText};
+use crate::state::AppState;
+
+pub enum TopbarAction {
+    New,
+    Open,
+    Save,
+    ExportPng,
+    ExportGif,
+    Undo,
+    Redo,
+    None,
+}
+
+pub fn show(ui: &mut Ui, state: &mut AppState, can_undo: bool, can_redo: bool) -> TopbarAction {
+    let mut action = TopbarAction::None;
+
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("mugenCanvas").strong().size(14.0));
+        ui.separator();
+
+        if ui.button("🗋").on_hover_text("新規 (Ctrl+N)").clicked() { action = TopbarAction::New; }
+        if ui.button("📂").on_hover_text("開く (Ctrl+O)").clicked() { action = TopbarAction::Open; }
+        if ui.button("💾").on_hover_text("保存 (Ctrl+S)").clicked() { action = TopbarAction::Save; }
+        ui.separator();
+
+        if ui.add_enabled(can_undo, egui::Button::new("↩")).on_hover_text("Undo (Ctrl+Z)").clicked() {
+            action = TopbarAction::Undo;
+        }
+        if ui.add_enabled(can_redo, egui::Button::new("↪")).on_hover_text("Redo (Ctrl+Shift+Z)").clicked() {
+            action = TopbarAction::Redo;
+        }
+        ui.separator();
+
+        if ui.button("📤").on_hover_text("現在フレームをPNG書き出し").clicked() { action = TopbarAction::ExportPng; }
+        if ui.button("🎞").on_hover_text("GIFアニメーション書き出し").clicked() { action = TopbarAction::ExportGif; }
+        ui.separator();
+
+        // Project info (center-ish)
+        let s = &state.project.settings;
+        ui.label(format!("{}×{}px / {}fps / {}f", s.width, s.height, s.fps, s.total_frames));
+        ui.separator();
+
+        // Viewport zoom select
+        ui.label("ズーム:");
+        let zoom_pct = (state.viewport.zoom * 100.0).round() as i32;
+        egui::ComboBox::from_id_salt("zoom_select")
+            .selected_text(format!("{}%", zoom_pct))
+            .width(80.0)
+            .show_ui(ui, |ui| {
+                for &pct in &[12, 25, 50, 75, 100, 150, 200, 400] {
+                    if ui.selectable_label(zoom_pct == pct, format!("{}%", pct)).clicked() {
+                        state.viewport.zoom = pct as f32 / 100.0;
+                    }
+                }
+            });
+
+        // Rotation indicator
+        let rot_deg = (state.viewport.rotation * 180.0 / std::f32::consts::PI).round() as i32;
+        if rot_deg != 0 {
+            if ui.button(format!("{}°↺", rot_deg)).on_hover_text("回転リセット (Ctrl+R)").clicked() {
+                state.viewport.rotation = 0.0;
+            }
+        }
+    });
+
+    action
+}

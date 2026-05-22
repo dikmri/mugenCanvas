@@ -1,16 +1,6 @@
-# Dependencies
-node_modules/
-
-# Build outputs
-dist/
-build/
-
-# Tauri build artifacts
+# Rust build artifacts
+target/
 src-tauri/target/
-
-# Vite cache
-.vite/
-node_modules/.vite/
 
 # Editor
 .vscode/
@@ -25,3 +15,6 @@ Thumbs.db
 # Env
 .env
 .env.local
+
+# Claude Code
+.claude/
