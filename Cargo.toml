@@ -1,6 +1,6 @@
 [package]
 name = "mugen-canvas"
-version = "0.2.0"
+version = "0.6.0"
 description = "mugenCanvas - Infinite canvas animation app"
 edition = "2021"
 
