@@ -6,6 +6,9 @@ on:
       - 'v*'
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 permissions:
   contents: write
 
@@ -68,7 +71,11 @@ jobs:
             libxkbcommon-x11-dev \
             libxcb-xkb-dev \
             libxcb-render0-dev \
-            libxcb-randr0-dev
+            libxcb-randr0-dev \
+            libwayland-dev \
+            libxcb-icccm4-dev \
+            libxcb-image0-dev \
+            libxcb-keysyms1-dev
 
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
