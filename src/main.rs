@@ -14,6 +14,7 @@ fn main() -> eframe::Result<()> {
             .with_title("mugenCanvas")
             .with_inner_size([1400.0, 900.0])
             .with_min_inner_size([800.0, 600.0]),
+        persist_window: true,
         ..Default::default()
     };
     eframe::run_native(

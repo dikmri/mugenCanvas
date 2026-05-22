@@ -7,6 +7,7 @@ pub enum Tool {
     Fill,
     Hand,
     Zoom,
+    Rotate,
     Camera,
 }
 

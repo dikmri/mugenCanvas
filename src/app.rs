@@ -2,6 +2,15 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use egui::{Color32, Context, Key, Pos2, Rect, Sense};
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize)]
+struct UserPrefs {
+    brush: crate::model::BrushSettings,
+    eraser: crate::model::BrushSettings,
+    show_grid: bool,
+    grid_size: u32,
+}
 
 use crate::canvas::viewport::{fit_viewport, pointer_to_world, unrotate_point, world_to_screen_rotated, zoom_around};
 use crate::canvas::{camera::get_camera_at_frame, CanvasState};
@@ -25,9 +34,9 @@ pub struct MugenCanvasApp {
     // Drawing input state
     is_painting: bool,
     is_panning: bool,
+    is_rotating: bool,
     is_mmb_panning: bool,
     is_space_down: bool,
-    is_r_down: bool,
     last_paint_pos: Option<(f32, f32)>,
     pan_start_pointer: Pos2,
     pan_start_offset: (f32, f32),
@@ -59,7 +68,15 @@ pub struct MugenCanvasApp {
 impl MugenCanvasApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         setup_fonts(&cc.egui_ctx);
-        let state = AppState::default();
+        let mut state = AppState::default();
+        if let Some(storage) = cc.storage {
+            if let Some(prefs) = eframe::get_value::<UserPrefs>(storage, "user_prefs") {
+                state.brush = prefs.brush;
+                state.eraser = prefs.eraser;
+                state.show_grid = prefs.show_grid;
+                state.grid_size = prefs.grid_size;
+            }
+        }
         let mut canvas = CanvasState::default();
         canvas.set_canvas_size(state.project.settings.width, state.project.settings.height);
         Self {
@@ -72,9 +89,9 @@ impl MugenCanvasApp {
             viewport_fitted: false,
             is_painting: false,
             is_panning: false,
+            is_rotating: false,
             is_mmb_panning: false,
             is_space_down: false,
-            is_r_down: false,
             last_paint_pos: None,
             pan_start_pointer: Pos2::ZERO,
             pan_start_offset: (0.0, 0.0),
@@ -123,6 +140,7 @@ impl MugenCanvasApp {
                 if i.key_pressed(Key::G) { self.state.selected_tool = Tool::Fill; }
                 if i.key_pressed(Key::H) { self.state.selected_tool = Tool::Hand; }
                 if i.key_pressed(Key::Z) { self.state.selected_tool = Tool::Zoom; }
+                if i.key_pressed(Key::R) { self.state.selected_tool = Tool::Rotate; }
                 if i.key_pressed(Key::C) { self.state.selected_tool = Tool::Camera; }
                 if i.key_pressed(Key::Enter) { self.state.is_playing = !self.state.is_playing; }
 
@@ -156,8 +174,6 @@ impl MugenCanvasApp {
 
             // Space for temporary hand tool
             self.is_space_down = i.key_down(Key::Space);
-            // R key for canvas rotation (actual rotation applied via pointer_delta in handle_canvas_input)
-            self.is_r_down = i.key_down(Key::R) && !ctrl;
         });
     }
 
@@ -232,14 +248,6 @@ impl MugenCanvasApp {
             let mmb_released = i.pointer.button_released(egui::PointerButton::Middle);
             let pointer_delta = i.pointer.delta();
 
-            // ── R held: rotate canvas by horizontal pointer movement ──────────
-            // pointer_delta is non-zero on any mouse move, button-press not needed.
-            if self.is_r_down && (pointer_delta.x != 0.0 || pointer_delta.y != 0.0) {
-                let rot_delta = pointer_delta.x * (std::f32::consts::PI / 300.0);
-                self.state.viewport.rotation += rot_delta;
-                self.dirty = true;
-            }
-
             // ── Middle mouse pan ──────────────────────────────────────────────
             if mmb_pressed && response.hovered() {
                 self.is_mmb_panning = true;
@@ -247,8 +255,9 @@ impl MugenCanvasApp {
                 self.pan_start_offset = (self.state.viewport.offset_x, self.state.viewport.offset_y);
             }
             if self.is_mmb_panning && mmb_down {
-                self.state.viewport.offset_x += pointer_delta.x;
-                self.state.viewport.offset_y += pointer_delta.y;
+                let (dx, dy) = unrotate_point(pointer_delta.x, pointer_delta.y, 0.0, 0.0, self.state.viewport.rotation);
+                self.state.viewport.offset_x += dx;
+                self.state.viewport.offset_y += dy;
                 self.dirty = true;
             }
             if mmb_released { self.is_mmb_panning = false; }
@@ -277,13 +286,13 @@ impl MugenCanvasApp {
             let is_hand = self.state.selected_tool == Tool::Hand || self.is_space_down;
 
             if primary_pressed && response.hovered() {
-                if self.is_r_down {
-                    // Rotation handled above; block other tools while R is held.
-                } else if is_hand || self.is_mmb_panning {
+                if is_hand || self.is_mmb_panning {
                     // Begin pan
                     self.is_panning = true;
                     self.pan_start_pointer = i.pointer.hover_pos().unwrap_or(panel_rect.center());
                     self.pan_start_offset = (self.state.viewport.offset_x, self.state.viewport.offset_y);
+                } else if self.state.selected_tool == Tool::Rotate {
+                    self.is_rotating = true;
                 } else if self.state.selected_tool == Tool::Camera {
                     if let Some((lx, ly)) = local_pos {
                         let (wx, wy) = pointer_to_world(lx, ly, panel_w, panel_h, &self.state.viewport);
@@ -396,9 +405,15 @@ impl MugenCanvasApp {
                         }
                     }
                 } else if self.is_panning {
-                    self.state.viewport.offset_x += pointer_delta.x;
-                    self.state.viewport.offset_y += pointer_delta.y;
+                    let (dx, dy) = unrotate_point(pointer_delta.x, pointer_delta.y, 0.0, 0.0, self.state.viewport.rotation);
+                    self.state.viewport.offset_x += dx;
+                    self.state.viewport.offset_y += dy;
                     self.dirty = true;
+                } else if self.is_rotating {
+                    if pointer_delta.x != 0.0 {
+                        self.state.viewport.rotation += pointer_delta.x * (std::f32::consts::PI / 300.0);
+                        self.dirty = true;
+                    }
                 } else if self.is_painting {
                     if let Some((lx, ly)) = local_pos {
                         let (wx, wy) = pointer_to_world(lx, ly, panel_w, panel_h, &self.state.viewport);
@@ -419,6 +434,7 @@ impl MugenCanvasApp {
             if primary_released {
                 self.is_painting = false;
                 self.is_panning = false;
+                self.is_rotating = false;
                 self.is_camera_dragging = false;
                 self.camera_drag_kf_start = None;
                 self.camera_resize_corner = None;
@@ -706,6 +722,16 @@ fn setup_fonts(ctx: &egui::Context) {
 // ─── eframe::App impl ─────────────────────────────────────────────────────────
 
 impl eframe::App for MugenCanvasApp {
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        let prefs = UserPrefs {
+            brush: self.state.brush.clone(),
+            eraser: self.state.eraser.clone(),
+            show_grid: self.state.show_grid,
+            grid_size: self.state.grid_size,
+        };
+        eframe::set_value(storage, "user_prefs", &prefs);
+    }
+
     // Capture stylus/touch pressure from winit Touch events before egui processes them.
     // force is None when using a regular mouse; defaults to 1.0 in that case.
     fn raw_input_hook(&mut self, _ctx: &Context, raw_input: &mut egui::RawInput) {
@@ -783,7 +809,7 @@ impl eframe::App for MugenCanvasApp {
         });
 
         // ── Left panel: tool + color ──────────────────────────────────────────
-        egui::SidePanel::left("left_panel").default_width(60.0).show(ctx, |ui| {
+        egui::SidePanel::left("left_panel").default_width(120.0).show(ctx, |ui| {
             crate::ui::toolbar::show(ui, &mut self.state);
             ui.separator();
             egui::ScrollArea::vertical().show(ui, |ui| {
@@ -838,9 +864,9 @@ impl eframe::App for MugenCanvasApp {
             }
 
             // Rotation crosshair overlay
-            if self.is_r_down {
+            if self.state.selected_tool == Tool::Rotate {
                 let cr = response.rect.center();
-                let stroke = egui::Stroke::new(1.0, Color32::from_rgba_unmultiplied(74, 144, 226, 128));
+                let stroke = egui::Stroke::new(1.0, Color32::from_rgba_unmultiplied(74, 144, 226, 180));
                 painter.line_segment([egui::pos2(cr.x - 20.0, cr.y), egui::pos2(cr.x + 20.0, cr.y)], stroke);
                 painter.line_segment([egui::pos2(cr.x, cr.y - 20.0), egui::pos2(cr.x, cr.y + 20.0)], stroke);
             }
@@ -860,6 +886,7 @@ impl eframe::App for MugenCanvasApp {
                 Tool::Brush | Tool::Eraser => egui::CursorIcon::Crosshair,
                 Tool::Zoom => egui::CursorIcon::ZoomIn,
                 Tool::Hand => egui::CursorIcon::Grab,
+                Tool::Rotate => egui::CursorIcon::AllScroll,
                 _ => egui::CursorIcon::Default,
             };
             ctx.set_cursor_icon(cursor);
