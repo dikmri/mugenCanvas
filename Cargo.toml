@@ -27,4 +27,6 @@ incremental = true
 codegen-units = 1
 lto = true
 opt-level = "s"
-strip = true
+# strip = false (デフォルト) にして関数名・行番号をバイナリに残す
+# → クラッシュログのスタックトレースが読める状態になる
+debug = 1

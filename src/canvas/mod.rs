@@ -197,15 +197,20 @@ impl CanvasState {
             }
         }
 
+        let any_clipping = layers.iter().any(|l| l.clipping && l.visible);
         let mut clip_alpha: Vec<u8> = vec![0u8; screen_w * screen_h];
         for layer in layers {
             if !layer.visible { continue; }
             if !layer.clipping {
-                if let Some(src) = resolve_layer_frame(layer, current_frame) {
-                    clip_alpha = self.capture_layer_alpha(screen_w, screen_h, &layer.id, src, vp);
+                if any_clipping {
+                    if let Some(src) = resolve_layer_frame(layer, current_frame) {
+                        clip_alpha = self.capture_layer_alpha(screen_w, screen_h, &layer.id, src, vp);
+                        self.blit_layer(&mut out, screen_w, screen_h, &layer.id, src, vp, 1.0, None, None);
+                    } else {
+                        clip_alpha.iter_mut().for_each(|a| *a = 0);
+                    }
+                } else if let Some(src) = resolve_layer_frame(layer, current_frame) {
                     self.blit_layer(&mut out, screen_w, screen_h, &layer.id, src, vp, 1.0, None, None);
-                } else {
-                    clip_alpha.iter_mut().for_each(|a| *a = 0);
                 }
             } else if let Some(src) = resolve_layer_frame(layer, current_frame) {
                 self.blit_layer(&mut out, screen_w, screen_h, &layer.id, src, vp, 1.0, None, Some(&clip_alpha));
@@ -321,11 +326,12 @@ impl CanvasState {
     ) -> Vec<u8> {
         let (w, h) = (width as usize, height as usize);
         let mut out = vec![255u8; w * h * 4];
+        let any_clipping = layers.iter().any(|l| l.clipping && l.visible);
         let mut clip_alpha = vec![0u8; w * h];
 
         for layer in layers {
             if !layer.visible { continue; }
-            if !layer.clipping {
+            if !layer.clipping && any_clipping {
                 clip_alpha.iter_mut().for_each(|a| *a = 0);
             }
             let src_frame = match resolve_layer_frame(layer, frame) {
@@ -358,10 +364,10 @@ impl CanvasState {
                                 if dx >= w || dy >= h { continue; }
                                 let pidx = dy * w + dx;
                                 let di = pidx * 4;
-                                let src_a = if layer.clipping {
+                                let src_a = if any_clipping && layer.clipping {
                                     (raw_a as u32 * clip_alpha[pidx] as u32 / 255) as u8
                                 } else {
-                                    clip_alpha[pidx] = raw_a;
+                                    if any_clipping { clip_alpha[pidx] = raw_a; }
                                     raw_a
                                 };
                                 if src_a == 0 { continue; }
@@ -402,10 +408,15 @@ impl CanvasState {
                     let (sx_f, sy_f) = world_to_screen((tx * TILE_SIZE) as f32, (ty * TILE_SIZE) as f32, vp);
                     let dst_x = sx_f as i32;
                     let dst_y = sy_f as i32;
+                    // Clamp as i32 first to avoid negative→usize wrapping
+                    let x1i = (dst_x + scaled).min(ow as i32);
+                    let y1i = (dst_y + scaled).min(oh as i32);
+                    if x1i <= 0 || y1i <= 0 { continue; }
                     let x0 = dst_x.max(0) as usize;
                     let y0 = dst_y.max(0) as usize;
-                    let x1 = (dst_x + scaled).min(ow as i32) as usize;
-                    let y1 = (dst_y + scaled).min(oh as i32) as usize;
+                    let x1 = x1i as usize;
+                    let y1 = y1i as usize;
+                    if x0 >= x1 || y0 >= y1 { continue; }
                     for py in y0..y1 {
                         for px in x0..x1 {
                             let spx = (((px as i32 - dst_x) as f32 * scale) as usize).min(TS - 1);
@@ -474,10 +485,14 @@ fn blit_scaled(
     alpha: f32, tint: Option<[u8; 3]>, clip: Option<&[u8]>,
 ) {
     if dst_size <= 0 { return; }
+    // Clamp to output bounds first as i32 to avoid negative→usize wrapping
+    let x1i = (dst_x + dst_size).min(out_w as i32);
+    let y1i = (dst_y + dst_size).min(out_h as i32);
+    if x1i <= 0 || y1i <= 0 { return; }
     let x0 = dst_x.max(0) as usize;
     let y0 = dst_y.max(0) as usize;
-    let x1 = (dst_x + dst_size).min(out_w as i32) as usize;
-    let y1 = (dst_y + dst_size).min(out_h as i32) as usize;
+    let x1 = x1i as usize;
+    let y1 = y1i as usize;
     if x0 >= x1 || y0 >= y1 { return; }
 
     let scale = tile_size as f32 / dst_size as f32;
