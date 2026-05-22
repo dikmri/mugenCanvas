@@ -2,6 +2,9 @@
 target/
 src-tauri/target/
 
+# Node.js (残存する旧 Tauri+TS 環境)
+node_modules/
+
 # Editor
 .vscode/
 .idea/
