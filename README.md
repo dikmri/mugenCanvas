@@ -268,5 +268,4 @@ src/
     layers_panel.rs  # レイヤー一覧
     timeline.rs    # タイムライン
   io.rs            # 保存・読み込み・PNG/GIF 書き出し
-memo/              # 実装計画・仕様書・モックアップ
 ```

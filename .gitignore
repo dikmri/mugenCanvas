@@ -21,3 +21,6 @@ Thumbs.db
 
 # Claude Code
 .claude/
+
+# Internal development notes
+memo/
