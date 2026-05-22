@@ -2,6 +2,17 @@
 
 アニメーション制作用デスクトップアプリ。Rust + eframe (egui + wgpu + winit) で構築。
 
+## ダウンロード
+
+| プラットフォーム | ダウンロード |
+|---|---|
+| Windows (x86_64) | [mugen-canvas-windows-x86_64.exe](https://github.com/dikmri/mugenCanvas/releases/latest/download/mugen-canvas-windows-x86_64.exe) |
+| macOS (Apple Silicon) | [mugen-canvas-macos-aarch64](https://github.com/dikmri/mugenCanvas/releases/latest/download/mugen-canvas-macos-aarch64) |
+| macOS (Intel) | [mugen-canvas-macos-x86_64](https://github.com/dikmri/mugenCanvas/releases/latest/download/mugen-canvas-macos-x86_64) |
+| Linux (x86_64) | [mugen-canvas-linux-x86_64](https://github.com/dikmri/mugenCanvas/releases/latest/download/mugen-canvas-linux-x86_64) |
+
+→ [全リリース一覧](https://github.com/dikmri/mugenCanvas/releases)
+
 ## 主な機能
 
 - **無限キャンバス** — タイル分割方式 (1024×1024px/タイル) により実質無限に描画可能
