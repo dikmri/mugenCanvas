@@ -1,4 +1,5 @@
 use egui::{Ui, Color32, RichText, Stroke};
+use egui_phosphor::regular as ph;
 use crate::state::AppState;
 
 /// Returns (frame_changed, hold_set, hold_released)
@@ -32,8 +33,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) -> bool {
         ui.label(format!("{} / {}  {}fps", state.current_frame, total, fps));
 
         ui.separator();
-        let onion_label = if state.onion_skin { "🧅 ON" } else { "🧅 OFF" };
-        if ui.button(onion_label).on_hover_text("オニオンスキン").clicked() {
+        let onion_icon = if state.onion_skin { ph::EYE } else { ph::EYE_SLASH };
+        if ui.button(onion_icon).on_hover_text("オニオンスキン").clicked() {
             state.onion_skin = !state.onion_skin; dirty = true;
         }
     });

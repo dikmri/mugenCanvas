@@ -1,4 +1,5 @@
 use egui::{Ui, RichText};
+use egui_phosphor::regular as ph;
 use crate::state::AppState;
 
 pub enum TopbarAction {
@@ -19,24 +20,22 @@ pub fn show(ui: &mut Ui, state: &mut AppState, can_undo: bool, can_redo: bool) -
         ui.label(RichText::new("mugenCanvas").strong().size(14.0));
         ui.separator();
 
-        if ui.button("🗋").on_hover_text("新規 (Ctrl+N)").clicked() { action = TopbarAction::New; }
-        if ui.button("📂").on_hover_text("開く (Ctrl+O)").clicked() { action = TopbarAction::Open; }
-        if ui.button("💾").on_hover_text("保存 (Ctrl+S)").clicked() { action = TopbarAction::Save; }
+        if ui.button(ph::FILE_PLUS).on_hover_text("新規 (Ctrl+N)").clicked()  { action = TopbarAction::New; }
+        if ui.button(ph::FOLDER_OPEN).on_hover_text("開く (Ctrl+O)").clicked() { action = TopbarAction::Open; }
+        if ui.button(ph::FLOPPY_DISK).on_hover_text("保存 (Ctrl+S)").clicked() { action = TopbarAction::Save; }
         ui.separator();
 
-        if ui.add_enabled(can_undo, egui::Button::new("↩")).on_hover_text("Undo (Ctrl+Z)").clicked() {
-            action = TopbarAction::Undo;
-        }
-        if ui.add_enabled(can_redo, egui::Button::new("↪")).on_hover_text("Redo (Ctrl+Shift+Z)").clicked() {
-            action = TopbarAction::Redo;
-        }
+        if ui.add_enabled(can_undo, egui::Button::new(ph::ARROW_COUNTER_CLOCKWISE))
+            .on_hover_text("Undo (Ctrl+Z)").clicked() { action = TopbarAction::Undo; }
+        if ui.add_enabled(can_redo, egui::Button::new(ph::ARROW_CLOCKWISE))
+            .on_hover_text("Redo (Ctrl+Y)").clicked() { action = TopbarAction::Redo; }
         ui.separator();
 
-        if ui.button("📤").on_hover_text("現在フレームをPNG書き出し").clicked() { action = TopbarAction::ExportPng; }
-        if ui.button("🎞").on_hover_text("GIFアニメーション書き出し").clicked() { action = TopbarAction::ExportGif; }
+        if ui.button(ph::UPLOAD_SIMPLE).on_hover_text("現在フレームをPNG書き出し").clicked() { action = TopbarAction::ExportPng; }
+        if ui.button(ph::FILM_STRIP).on_hover_text("GIFアニメーション書き出し").clicked()   { action = TopbarAction::ExportGif; }
         ui.separator();
 
-        // Project info (center-ish)
+        // Project info
         let s = &state.project.settings;
         ui.label(format!("{}×{}px / {}fps / {}f", s.width, s.height, s.fps, s.total_frames));
         ui.separator();

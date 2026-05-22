@@ -8,6 +8,18 @@ pub fn world_to_screen(wx: f32, wy: f32, vp: &Viewport) -> (f32, f32) {
     (wx * vp.zoom + vp.offset_x, wy * vp.zoom + vp.offset_y)
 }
 
+/// Convert world coordinates to screen coordinates, applying viewport rotation around (cx, cy).
+pub fn world_to_screen_rotated(wx: f32, wy: f32, vp: &Viewport, cx: f32, cy: f32) -> (f32, f32) {
+    let sx = wx * vp.zoom + vp.offset_x;
+    let sy = wy * vp.zoom + vp.offset_y;
+    if vp.rotation == 0.0 { return (sx, sy); }
+    let dx = sx - cx;
+    let dy = sy - cy;
+    let cos_r = vp.rotation.cos();
+    let sin_r = vp.rotation.sin();
+    (cx + dx * cos_r - dy * sin_r, cy + dx * sin_r + dy * cos_r)
+}
+
 pub fn zoom_around(vp: &Viewport, pivot_x: f32, pivot_y: f32, factor: f32) -> Viewport {
     let new_zoom = (vp.zoom * factor).clamp(0.05, 32.0);
     Viewport {

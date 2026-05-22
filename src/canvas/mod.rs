@@ -214,15 +214,76 @@ impl CanvasState {
         tint: Option<[u8; 3]>,
     ) {
         let lf: LfKey = (layer_id.to_string(), frame);
-        let coords = match self.tile_sets.get(&lf) {
-            Some(s) => s.iter().cloned().collect::<Vec<_>>(),
-            None => return,
-        };
-        let scaled = (TILE_SIZE as f32 * vp.zoom) as i32;
-        for (tx, ty) in coords {
-            if let Some(tile) = self.tiles.get(&(layer_id.to_string(), frame, tx, ty)) {
-                let (sx, sy) = world_to_screen((tx * TILE_SIZE) as f32, (ty * TILE_SIZE) as f32, vp);
-                blit_scaled(out, ow, oh, tile, TS, sx as i32, sy as i32, scaled, alpha, tint);
+
+        if vp.rotation == 0.0 {
+            // Fast path: no rotation — tile-based forward blit
+            let coords: Vec<(i32, i32)> = match self.tile_sets.get(&lf) {
+                Some(s) => s.iter().cloned().collect(),
+                None => return,
+            };
+            let scaled = (TILE_SIZE as f32 * vp.zoom) as i32;
+            for (tx, ty) in coords {
+                if let Some(tile) = self.tiles.get(&(layer_id.to_string(), frame, tx, ty)) {
+                    let (sx, sy) = world_to_screen((tx * TILE_SIZE) as f32, (ty * TILE_SIZE) as f32, vp);
+                    blit_scaled(out, ow, oh, tile, TS, sx as i32, sy as i32, scaled, alpha, tint);
+                }
+            }
+        } else {
+            // Rotation path: per-pixel inverse transform (sample world from each screen pixel)
+            let tile_set: std::collections::HashSet<(i32, i32)> = match self.tile_sets.get(&lf) {
+                Some(s) => s.clone(),
+                None => return,
+            };
+            if tile_set.is_empty() { return; }
+
+            let cx = ow as f32 / 2.0;
+            let cy = oh as f32 / 2.0;
+            // Inverse rotation: rotate by -vp.rotation => cos(-θ)=cos(θ), sin(-θ)=-sin(θ)
+            let cos_r = vp.rotation.cos();
+            let sin_r = vp.rotation.sin();
+
+            for py in 0..oh {
+                for px in 0..ow {
+                    let dx = px as f32 - cx;
+                    let dy = py as f32 - cy;
+                    // Unrotate screen point (same formula as unrotate_point / pointer_to_world)
+                    let ux = cx + dx * cos_r + dy * sin_r;
+                    let uy = cy - dx * sin_r + dy * cos_r;
+                    // Screen → world
+                    let wx = (ux - vp.offset_x) / vp.zoom;
+                    let wy = (uy - vp.offset_y) / vp.zoom;
+                    // Tile index
+                    let tx = (wx / TILE_SIZE as f32).floor() as i32;
+                    let ty = (wy / TILE_SIZE as f32).floor() as i32;
+
+                    if !tile_set.contains(&(tx, ty)) { continue; }
+
+                    if let Some(tile) = self.tiles.get(&(layer_id.to_string(), frame, tx, ty)) {
+                        let lx = ((wx - (tx * TILE_SIZE) as f32).max(0.0) as usize).min(TS - 1);
+                        let ly = ((wy - (ty * TILE_SIZE) as f32).max(0.0) as usize).min(TS - 1);
+                        let si = (ly * TS + lx) * 4;
+                        let src_a_raw = tile[si + 3];
+                        if src_a_raw == 0 { continue; }
+
+                        let (sr, sg, sb) = if let Some([tr, tg, tb]) = tint {
+                            (tr, tg, tb)
+                        } else {
+                            (tile[si], tile[si + 1], tile[si + 2])
+                        };
+
+                        let sa = src_a_raw as f32 / 255.0 * alpha;
+                        let di = (py * ow + px) * 4;
+                        let da = out[di + 3] as f32 / 255.0;
+                        let oa = sa + da * (1.0 - sa);
+                        if oa > 0.001 {
+                            let inv = 1.0 / oa;
+                            out[di]     = ((sr as f32 * sa + out[di]     as f32 * da * (1.0 - sa)) * inv) as u8;
+                            out[di + 1] = ((sg as f32 * sa + out[di + 1] as f32 * da * (1.0 - sa)) * inv) as u8;
+                            out[di + 2] = ((sb as f32 * sa + out[di + 2] as f32 * da * (1.0 - sa)) * inv) as u8;
+                            out[di + 3] = (oa * 255.0) as u8;
+                        }
+                    }
+                }
             }
         }
     }

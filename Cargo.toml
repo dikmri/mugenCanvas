@@ -18,6 +18,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 base64 = { version = "0.22", features = ["std"] }
 rayon = "1"
 rfd = "0.15"
+egui-phosphor = "0.7"
 
 [profile.dev]
 incremental = true

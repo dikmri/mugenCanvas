@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use egui::{Color32, Context, Key, Pos2, Rect, Sense};
 
-use crate::canvas::viewport::{fit_viewport, pointer_to_world, unrotate_point, zoom_around};
+use crate::canvas::viewport::{fit_viewport, pointer_to_world, unrotate_point, world_to_screen_rotated, zoom_around};
 use crate::canvas::{camera::get_camera_at_frame, CanvasState};
 use crate::io;
 use crate::model::Tool;
@@ -27,12 +27,9 @@ pub struct MugenCanvasApp {
     is_mmb_panning: bool,
     is_space_down: bool,
     is_r_down: bool,
-    is_rotating: bool,
     last_paint_pos: Option<(f32, f32)>,
     pan_start_pointer: Pos2,
     pan_start_offset: (f32, f32),
-    rotate_start_angle: f32,
-    rotate_start_vp_angle: f32,
 
     // Playback
     last_frame_time: Option<Instant>,
@@ -61,12 +58,9 @@ impl MugenCanvasApp {
             is_mmb_panning: false,
             is_space_down: false,
             is_r_down: false,
-            is_rotating: false,
             last_paint_pos: None,
             pan_start_pointer: Pos2::ZERO,
             pan_start_offset: (0.0, 0.0),
-            rotate_start_angle: 0.0,
-            rotate_start_vp_angle: 0.0,
             last_frame_time: None,
             status_msg: None,
             gif_exporting: false,
@@ -91,6 +85,8 @@ impl MugenCanvasApp {
             if ctrl && !shift && i.key_pressed(Key::O) { self.do_open(); }
             if ctrl && !shift && i.key_pressed(Key::N) { self.do_new(); }
             if ctrl && !shift && i.key_pressed(Key::R) { self.state.viewport.rotation = 0.0; self.dirty = true; }
+            if ctrl && !shift && i.key_pressed(Key::E) { self.state.viewport.rotation += 20.0_f32.to_radians(); self.dirty = true; }
+            if ctrl && !shift && i.key_pressed(Key::Q) { self.state.viewport.rotation -= 20.0_f32.to_radians(); self.dirty = true; }
 
             // Tool shortcuts (no modifier)
             if !ctrl && !shift {
@@ -101,17 +97,39 @@ impl MugenCanvasApp {
                 if i.key_pressed(Key::Z) { self.state.selected_tool = Tool::Zoom; }
                 if i.key_pressed(Key::C) { self.state.selected_tool = Tool::Camera; }
                 if i.key_pressed(Key::Enter) { self.state.is_playing = !self.state.is_playing; }
+
+                // Frame navigation
+                if i.key_pressed(Key::ArrowLeft) {
+                    let f = self.state.current_frame.saturating_sub(1).max(1);
+                    self.state.set_frame(f); self.dirty = true;
+                }
+                if i.key_pressed(Key::ArrowRight) {
+                    let f = (self.state.current_frame + 1).min(self.state.project.settings.total_frames);
+                    self.state.set_frame(f); self.dirty = true;
+                }
+
+                // . key: toggle koma hold on current frame of selected layer
+                if i.key_pressed(Key::Period) {
+                    let frame = self.state.current_frame;
+                    let layer_id = self.state.selected_layer_id.clone();
+                    let is_hold = self.state.project.layers.iter()
+                        .find(|l| l.id == layer_id)
+                        .and_then(|l| l.frames.iter().find(|f| f.frame == frame))
+                        .map(|f| f.hold_source.is_some())
+                        .unwrap_or(false);
+                    if is_hold {
+                        self.state.release_koma_hold(frame, &layer_id);
+                    } else {
+                        self.state.set_koma_hold(frame, &layer_id);
+                    }
+                    self.dirty = true;
+                }
             }
 
             // Space for temporary hand tool
             self.is_space_down = i.key_down(Key::Space);
-            // R key for rotate
-            let r_was_down = self.is_r_down;
+            // R key for canvas rotation (actual rotation applied via pointer_delta in handle_canvas_input)
             self.is_r_down = i.key_down(Key::R) && !ctrl;
-            if r_was_down && !self.is_r_down {
-                self.is_rotating = false;
-                self.dirty = true;
-            }
         });
     }
 
@@ -172,10 +190,11 @@ impl MugenCanvasApp {
         let panel_w = panel_rect.width();
         let panel_h = panel_rect.height();
 
-        // Map current pointer to panel-local coords
+        // Map current pointer to panel-local coords.
+        // Use latest_pos() (not hover_pos()) so drag operations like rotation
+        // continue to track the pointer after it crosses the decidedly-dragging threshold.
         let local_pos: Option<(f32, f32)> = ctx.input(|i| {
-            i.pointer.hover_pos()
-                .filter(|&p| panel_rect.contains(p))
+            i.pointer.latest_pos()
                 .map(|p| (p.x - panel_rect.min.x, p.y - panel_rect.min.y))
         });
 
@@ -187,6 +206,14 @@ impl MugenCanvasApp {
             let mmb_down = i.pointer.button_down(egui::PointerButton::Middle);
             let mmb_released = i.pointer.button_released(egui::PointerButton::Middle);
             let pointer_delta = i.pointer.delta();
+
+            // ── R held: rotate canvas by horizontal pointer movement ──────────
+            // pointer_delta is non-zero on any mouse move, button-press not needed.
+            if self.is_r_down && (pointer_delta.x != 0.0 || pointer_delta.y != 0.0) {
+                let rot_delta = pointer_delta.x * (std::f32::consts::PI / 300.0);
+                self.state.viewport.rotation += rot_delta;
+                self.dirty = true;
+            }
 
             // ── Middle mouse pan ──────────────────────────────────────────────
             if mmb_pressed && response.hovered() {
@@ -226,15 +253,7 @@ impl MugenCanvasApp {
 
             if primary_pressed && response.hovered() {
                 if self.is_r_down {
-                    // Begin rotate
-                    self.is_rotating = true;
-                    if let Some((lx, ly)) = local_pos {
-                        let cx = panel_w / 2.0;
-                        let cy = panel_h / 2.0;
-                        self.rotate_start_angle = (ly - cy).atan2(lx - cx);
-                        self.rotate_start_vp_angle = self.state.viewport.rotation;
-                    }
-                    self.dirty = true;
+                    // Rotation handled above; block other tools while R is held.
                 } else if is_hand || self.is_mmb_panning {
                     // Begin pan
                     self.is_panning = true;
@@ -284,15 +303,7 @@ impl MugenCanvasApp {
             }
 
             if primary_down {
-                if self.is_rotating {
-                    if let Some((lx, ly)) = local_pos {
-                        let cx = panel_w / 2.0; let cy = panel_h / 2.0;
-                        let angle = (ly - cy).atan2(lx - cx);
-                        let delta = angle - self.rotate_start_angle;
-                        self.state.viewport.rotation = self.rotate_start_vp_angle + delta;
-                        self.dirty = true;
-                    }
-                } else if self.is_panning {
+                if self.is_panning {
                     self.state.viewport.offset_x += pointer_delta.x;
                     self.state.viewport.offset_y += pointer_delta.y;
                     self.dirty = true;
@@ -315,7 +326,6 @@ impl MugenCanvasApp {
             if primary_released {
                 self.is_painting = false;
                 self.is_panning = false;
-                self.is_rotating = false;
                 self.last_paint_pos = None;
             }
         });
@@ -467,7 +477,7 @@ impl MugenCanvasApp {
 fn setup_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
 
-    // Candidate Japanese fonts (Windows system fonts)
+    // Japanese fonts (Windows system fonts) — appended as fallback after default ASCII font
     let jp_candidates = [
         "C:/Windows/Fonts/meiryo.ttc",
         "C:/Windows/Fonts/YuGothR.ttc",
@@ -477,17 +487,16 @@ fn setup_fonts(ctx: &egui::Context) {
     ];
     for path in &jp_candidates {
         if let Ok(data) = std::fs::read(path) {
-            fonts.font_data.insert(
-                "jp".to_owned(),
-                egui::FontData::from_owned(data),
-            );
-            // Append as fallback so ASCII characters still use the default font first
+            fonts.font_data.insert("jp".to_owned(), egui::FontData::from_owned(data));
             for family in fonts.families.values_mut() {
                 family.push("jp".to_owned());
             }
             break;
         }
     }
+
+    // Phosphor Icons font — provides all toolbar/UI icons as Unicode glyphs
+    egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
 
     ctx.set_fonts(fonts);
 }
@@ -608,7 +617,7 @@ impl eframe::App for MugenCanvasApp {
             }
 
             // Rotation crosshair overlay
-            if self.is_rotating || self.is_r_down {
+            if self.is_r_down {
                 let cr = response.rect.center();
                 let stroke = egui::Stroke::new(1.0, Color32::from_rgba_unmultiplied(74, 144, 226, 128));
                 painter.line_segment([egui::pos2(cr.x - 20.0, cr.y), egui::pos2(cr.x + 20.0, cr.y)], stroke);
@@ -635,42 +644,50 @@ impl eframe::App for MugenCanvasApp {
 // ─── Camera frame overlay ──────────────────────────────────────────────────────
 
 fn draw_camera_overlay_onto(pixels: &mut [u8], state: &AppState, w: usize, h: usize) {
-    use crate::canvas::viewport::world_to_screen;
     let kf = get_camera_at_frame(&state.project.camera_track.keyframes, state.current_frame);
     if !state.project.camera_track.visible { return; }
     let vp = &state.viewport;
+    let scx = w as f32 / 2.0;
+    let scy = h as f32 / 2.0;
 
-    let (x0, y0) = world_to_screen(kf.x as f32, kf.y as f32, vp);
-    let (x1, y1) = world_to_screen((kf.x + kf.width) as f32, (kf.y + kf.height) as f32, vp);
+    // Transform all 4 corners: world → screen (with rotation)
+    let world_corners = [
+        (kf.x as f32,                       kf.y as f32),
+        (kf.x as f32 + kf.width as f32,     kf.y as f32),
+        (kf.x as f32 + kf.width as f32,     kf.y as f32 + kf.height as f32),
+        (kf.x as f32,                       kf.y as f32 + kf.height as f32),
+    ];
+    let mut sc = [(0i32, 0i32); 4];
+    for (i, &(wx, wy)) in world_corners.iter().enumerate() {
+        let (sx, sy) = world_to_screen_rotated(wx, wy, vp, scx, scy);
+        sc[i] = (sx as i32, sy as i32);
+    }
 
     let red = [0xffu8, 0x4bu8, 0x4bu8, 0xffu8];
-    draw_hline(pixels, w, h, x0 as i32, x1 as i32, y0 as i32, red);
-    draw_hline(pixels, w, h, x0 as i32, x1 as i32, y1 as i32, red);
-    draw_vline(pixels, w, h, x0 as i32, y0 as i32, y1 as i32, red);
-    draw_vline(pixels, w, h, x1 as i32, y0 as i32, y1 as i32, red);
-}
-
-fn draw_hline(pixels: &mut [u8], pw: usize, ph: usize, x0: i32, x1: i32, y: i32, color: [u8; 4]) {
-    if y < 0 || y >= ph as i32 { return; }
-    // Completely off-screen horizontally: negative cast to usize would wrap
-    if x1 < 0 || x0 >= pw as i32 { return; }
-    let xa = x0.max(0) as usize;
-    let xb = x1.min(pw as i32 - 1) as usize;  // safe: x1 >= 0 after early return
-    for x in xa..=xb {
-        let i = (y as usize * pw + x) * 4;
-        pixels[i..i+4].copy_from_slice(&color);
+    for i in 0..4 {
+        let (x0, y0) = sc[i];
+        let (x1, y1) = sc[(i + 1) % 4];
+        draw_line(pixels, w, h, x0, y0, x1, y1, red);
     }
 }
 
-fn draw_vline(pixels: &mut [u8], pw: usize, ph: usize, x: i32, y0: i32, y1: i32, color: [u8; 4]) {
-    if x < 0 || x >= pw as i32 { return; }
-    // Completely off-screen vertically: negative cast to usize would wrap
-    if y1 < 0 || y0 >= ph as i32 { return; }
-    let ya = y0.max(0) as usize;
-    let yb = y1.min(ph as i32 - 1) as usize;  // safe: y1 >= 0 after early return
-    for y in ya..=yb {
-        let i = (y * pw + x as usize) * 4;
-        pixels[i..i+4].copy_from_slice(&color);
+/// Bresenham's line — clips to buffer bounds.
+fn draw_line(pixels: &mut [u8], pw: usize, ph: usize, x0: i32, y0: i32, x1: i32, y1: i32, color: [u8; 4]) {
+    let dx = (x1 - x0).abs();
+    let dy = (y1 - y0).abs();
+    let sx = if x0 < x1 { 1i32 } else { -1i32 };
+    let sy = if y0 < y1 { 1i32 } else { -1i32 };
+    let mut err = dx - dy;
+    let (mut x, mut y) = (x0, y0);
+    loop {
+        if x >= 0 && x < pw as i32 && y >= 0 && y < ph as i32 {
+            let i = (y as usize * pw + x as usize) * 4;
+            pixels[i..i + 4].copy_from_slice(&color);
+        }
+        if x == x1 && y == y1 { break; }
+        let e2 = 2 * err;
+        if e2 > -dy { err -= dy; x += sx; }
+        if e2 < dx  { err += dx; y += sy; }
     }
 }
 
