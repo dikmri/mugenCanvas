@@ -8,6 +8,7 @@ pub struct AppState {
     pub viewport: Viewport,
     pub brush: BrushSettings,
     pub eraser: BrushSettings,
+    pub pen: BrushSettings,
     pub is_playing: bool,
     pub onion_skin: bool,
     pub onion_skin_settings: OnionSkinSettings,
@@ -31,6 +32,9 @@ impl Default for AppState {
             brush: BrushSettings::default(),
             eraser: BrushSettings {
                 size: 30.0, opacity: 1.0, color: [0, 0, 0], anti_alias: true, min_size: 1.0,
+            },
+            pen: BrushSettings {
+                size: 10.0, opacity: 1.0, color: [0x22, 0x22, 0x22], anti_alias: false, min_size: 0.5,
             },
             is_playing: false,
             onion_skin: false,
@@ -109,7 +113,11 @@ impl AppState {
     }
 
     pub fn active_brush(&self) -> &BrushSettings {
-        if self.selected_tool == Tool::Eraser { &self.eraser } else { &self.brush }
+        match self.selected_tool {
+            Tool::Eraser => &self.eraser,
+            Tool::Pen => &self.pen,
+            _ => &self.brush,
+        }
     }
 
     /// Returns true if the current frame on the selected layer is drawable.

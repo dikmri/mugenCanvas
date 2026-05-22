@@ -9,6 +9,7 @@ pub enum TopbarAction {
     ExportPng,
     ExportPngSequence,
     ExportGif,
+    ExportMp4,
     Undo,
     Redo,
     ToggleGrid,
@@ -33,9 +34,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState, can_undo: bool, can_redo: bool) -
             .on_hover_text("Redo (Ctrl+Y)").clicked() { action = TopbarAction::Redo; }
         ui.separator();
 
-        if ui.button(ph::UPLOAD_SIMPLE).on_hover_text("現在フレームをPNG書き出し").clicked()    { action = TopbarAction::ExportPng; }
-        if ui.button(ph::IMAGES).on_hover_text("連番PNG書き出し (全フレーム)").clicked()         { action = TopbarAction::ExportPngSequence; }
-        if ui.button(ph::FILM_STRIP).on_hover_text("GIFアニメーション書き出し").clicked()        { action = TopbarAction::ExportGif; }
+        if ui.button(ph::UPLOAD_SIMPLE).on_hover_text("現在フレームをPNG書き出し").clicked()      { action = TopbarAction::ExportPng; }
+        if ui.button(ph::IMAGES).on_hover_text("連番PNG書き出し (フレーム範囲指定)").clicked()    { action = TopbarAction::ExportPngSequence; }
+        if ui.button(ph::FILM_STRIP).on_hover_text("GIFアニメーション書き出し (フレーム範囲指定)").clicked() { action = TopbarAction::ExportGif; }
+        if ui.button(ph::VIDEO_CAMERA).on_hover_text("MP4動画書き出し (ffmpeg必須, フレーム範囲指定)").clicked() { action = TopbarAction::ExportMp4; }
         ui.separator();
 
         let grid_icon = if state.show_grid { ph::GRID_FOUR } else { ph::GRID_FOUR };

@@ -9,6 +9,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) -> bool {
         ui.add_space(4.0);
         dirty |= tool_btn(ui, state, Tool::Brush,  ph::PENCIL,            "ブラシ",     "ブラシ (B)");
         dirty |= tool_btn(ui, state, Tool::Eraser, ph::ERASER,            "消しゴム",   "消しゴム (E)");
+        dirty |= tool_btn(ui, state, Tool::Pen,    ph::PEN_NIB,           "丸ペン",     "丸ペン (P) - 筆圧なし・くっきり");
         dirty |= tool_btn(ui, state, Tool::Fill,   ph::PAINT_BUCKET,      "塗りつぶし", "塗りつぶし (F)");
         ui.separator();
         dirty |= tool_btn(ui, state, Tool::Hand,   ph::HAND,                   "手のひら",   "手のひら (H)");

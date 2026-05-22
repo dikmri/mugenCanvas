@@ -102,18 +102,19 @@ pub fn export_png_sequence(
     dir: &str,
     canvas: &CanvasState,
     layers: &[crate::model::AnimationLayer],
-    total_frames: u32,
+    start_frame: u32, end_frame: u32,
     cam_x: f32, cam_y: f32,
     cam_w: u32, cam_h: u32,
     on_progress: impl Fn(u32, u32) + Send + Sync,
 ) -> Result<(), String> {
     use rayon::prelude::*;
 
+    let count = end_frame.saturating_sub(start_frame) + 1;
     // Phase 1: render + encode all frames in parallel
-    let pngs: Vec<(u32, Vec<u8>)> = (1..=total_frames)
+    let pngs: Vec<(u32, Vec<u8>)> = (start_frame..=end_frame)
         .into_par_iter()
         .map(|frame| -> Result<(u32, Vec<u8>), String> {
-            on_progress(frame, total_frames);
+            on_progress(frame - start_frame + 1, count);
             let rgba = canvas.export_region(layers, frame, cam_x, cam_y, cam_w, cam_h);
             let png = rgba_to_png(&rgba, cam_w, cam_h)
                 .map_err(|e| format!("PNG encode frame {}: {}", frame, e))?;
@@ -121,9 +122,10 @@ pub fn export_png_sequence(
         })
         .collect::<Result<_, _>>()?;
 
-    // Phase 2: write files sequentially
-    for (frame, png) in pngs {
-        let path = format!("{}/frame_{:04}.png", dir, frame);
+    // Phase 2: write files sequentially (sequential numbers from 0001)
+    for (i, (frame, png)) in pngs.into_iter().enumerate() {
+        let _ = frame;
+        let path = format!("{}/frame_{:04}.png", dir, i + 1);
         std::fs::write(&path, &png).map_err(|e| format!("write {}: {}", path, e))?;
     }
 
@@ -136,7 +138,7 @@ pub fn export_gif(
     path: &str,
     canvas: &CanvasState,
     layers: &[crate::model::AnimationLayer],
-    total_frames: u32,
+    start_frame: u32, end_frame: u32,
     fps: u32,
     cam_x: f32, cam_y: f32,
     cam_w: u32, cam_h: u32,
@@ -150,12 +152,13 @@ pub fn export_gif(
     let gif_w = (cam_w as f32 * scale).round() as u32;
     let gif_h = (cam_h as f32 * scale).round() as u32;
     let delay_cs = ((100.0 / fps.max(1) as f64).round() as u16).max(1);
+    let count = end_frame.saturating_sub(start_frame) + 1;
 
     // Phase 1: render + quantize all frames in parallel
-    let frames: Vec<Frame<'static>> = (1..=total_frames as usize)
+    let frames: Vec<Frame<'static>> = (start_frame as usize..=end_frame as usize)
         .into_par_iter()
         .map(|fi| -> Result<Frame<'static>, String> {
-            on_progress(fi as u32, total_frames);
+            on_progress((fi as u32) - start_frame + 1, count);
             let rgba = canvas.export_region(layers, fi as u32, cam_x, cam_y, cam_w, cam_h);
             let pixels_w;
             let mut pixels: Vec<u8>;
@@ -194,6 +197,50 @@ pub fn export_gif(
         enc.write_frame(&frame).map_err(|e| format!("write frame {}: {}", i, e))?;
     }
     Ok(())
+}
+
+// ─── MP4 export (requires ffmpeg in PATH) ─────────────────────────────────────
+
+pub fn export_mp4(
+    path: &str,
+    canvas: &CanvasState,
+    layers: &[crate::model::AnimationLayer],
+    start_frame: u32, end_frame: u32,
+    fps: u32,
+    cam_x: f32, cam_y: f32,
+    cam_w: u32, cam_h: u32,
+    on_progress: impl Fn(u32, u32),
+) -> Result<(), String> {
+    let tmp_dir = std::env::temp_dir().join("mugencanvas_mp4_export");
+    std::fs::create_dir_all(&tmp_dir).map_err(|e| format!("tmpdir作成失敗: {}", e))?;
+
+    let count = end_frame.saturating_sub(start_frame) + 1;
+    for frame in start_frame..=end_frame {
+        on_progress(frame - start_frame + 1, count);
+        let rgba = canvas.export_region(layers, frame, cam_x, cam_y, cam_w, cam_h);
+        let png = rgba_to_png(&rgba, cam_w, cam_h)
+            .map_err(|e| format!("PNG encode frame {}: {}", frame, e))?;
+        let fname = tmp_dir.join(format!("frame_{:04}.png", frame - start_frame + 1));
+        std::fs::write(&fname, &png).map_err(|e| format!("write frame {}: {}", frame, e))?;
+    }
+
+    let input_pat = tmp_dir.join("frame_%04d.png");
+    let status = std::process::Command::new("ffmpeg")
+        .arg("-y")
+        .arg("-r").arg(fps.to_string())
+        .arg("-i").arg(input_pat.to_str().unwrap_or(""))
+        .arg("-c:v").arg("libx264")
+        .arg("-pix_fmt").arg("yuv420p")
+        .arg(path)
+        .status();
+
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+
+    match status {
+        Ok(s) if s.success() => Ok(()),
+        Ok(_) => Err("ffmpegがエラーで終了しました".to_string()),
+        Err(e) => Err(format!("ffmpeg起動失敗 (ffmpegをインストールしてPATHに追加してください): {}", e)),
+    }
 }
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────

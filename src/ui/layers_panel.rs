@@ -44,6 +44,17 @@ pub fn show(ui: &mut Ui, state: &mut AppState, canvas: &mut CanvasState) -> (boo
                     if ui.small_button(lock_icon).on_hover_text("ロック切替").clicked() {
                         layer.locked = !layer.locked;
                     }
+                    // Clipping toggle
+                    let clip_color = if layer.clipping {
+                        Color32::from_rgb(100, 180, 255)
+                    } else {
+                        Color32::from_gray(120)
+                    };
+                    let clip_label = RichText::new("⌐").color(clip_color);
+                    if ui.small_button(clip_label).on_hover_text(if layer.clipping { "クリッピング ON (クリックで解除)" } else { "クリッピング OFF (クリックで有効)" }).clicked() {
+                        layer.clipping = !layer.clipping;
+                        dirty = true;
+                    }
                     // Name (editable on double click — simplified: just show it)
                     ui.label(RichText::new(&layer.name).color(if selected { Color32::WHITE } else { Color32::GRAY }));
                 });

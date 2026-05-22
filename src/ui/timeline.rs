@@ -1,9 +1,20 @@
 use egui::{Ui, Color32, RichText, Stroke};
 use egui_phosphor::regular as ph;
 use crate::canvas::camera::get_camera_at_frame;
+use crate::model::CameraEasing;
 use crate::state::AppState;
 
-/// Returns (frame_changed, hold_set, hold_released)
+fn easing_dot_color(easing: CameraEasing) -> Color32 {
+    match easing {
+        CameraEasing::Linear    => Color32::from_rgb(255, 200,  50),
+        CameraEasing::EaseIn    => Color32::from_rgb(100, 180, 255),
+        CameraEasing::EaseOut   => Color32::from_rgb( 80, 220, 120),
+        CameraEasing::EaseInOut => Color32::from_rgb(200, 100, 255),
+        CameraEasing::Hold      => Color32::from_rgb(255, 100, 100),
+    }
+}
+
+/// Returns true when the canvas needs a redraw.
 pub fn show(ui: &mut Ui, state: &mut AppState) -> bool {
     let mut dirty = false;
     let total = state.project.settings.total_frames;
@@ -42,7 +53,6 @@ pub fn show(ui: &mut Ui, state: &mut AppState) -> bool {
 
     ui.separator();
 
-    // Timeline scroll area
     let row_h = 20.0;
     let frame_w = 16.0;
     let header_w = 80.0;
@@ -56,6 +66,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) -> bool {
         let mut hold_released: Option<(String, u32)> = None;
         let mut cam_kf_add: Option<u32> = None;
         let mut cam_kf_remove: Option<u32> = None;
+        let mut cam_kf_easing: Option<(u32, CameraEasing)> = None;
 
         // ── Camera track row ──────────────────────────────────────────────────
         ui.horizontal(|ui| {
@@ -71,20 +82,50 @@ pub fn show(ui: &mut Ui, state: &mut AppState) -> bool {
             }
 
             for f in 1..=total {
-                let is_kf = state.project.camera_track.keyframes.iter().any(|k| k.frame == f);
+                let kf_opt = state.project.camera_track.keyframes.iter().find(|k| k.frame == f);
+                let is_kf = kf_opt.is_some();
+                let kf_easing = kf_opt.map(|k| k.easing).unwrap_or_default();
                 let is_current = f == current;
+
                 let fill = if is_current {
                     Color32::from_rgb(60, 140, 220)
                 } else if is_kf {
-                    Color32::from_rgb(220, 140, 30)
+                    Color32::from_gray(40)
                 } else {
                     Color32::from_gray(25)
                 };
-                let resp = draw_frame_cell(ui, frame_w, row_h, fill, Color32::TRANSPARENT, is_kf, false);
-                if resp.clicked() { new_frame = Some(f); }
-                if resp.secondary_clicked() {
-                    if is_kf { cam_kf_remove = Some(f); } else { cam_kf_add = Some(f); }
+
+                let dot = if is_kf { Some(easing_dot_color(kf_easing)) } else { None };
+                let resp = draw_frame_cell(ui, frame_w, row_h, fill, Color32::TRANSPARENT, dot, false);
+
+                // Evaluate clicked() before consuming resp in the context_menu chain
+                let clicked = resp.clicked();
+                if is_kf {
+                    resp.on_hover_text(format!("KF {}: {}", f, kf_easing.label()))
+                        .context_menu(|ui| {
+                            ui.label(RichText::new("イージング").size(11.0));
+                            ui.separator();
+                            for easing in CameraEasing::all() {
+                                if ui.selectable_label(kf_easing == easing, easing.label()).clicked() {
+                                    cam_kf_easing = Some((f, easing));
+                                    ui.close_menu();
+                                }
+                            }
+                            ui.separator();
+                            if ui.button("キーフレーム削除").clicked() {
+                                cam_kf_remove = Some(f);
+                                ui.close_menu();
+                            }
+                        });
+                } else {
+                    resp.context_menu(|ui| {
+                        if ui.button("キーフレーム追加").clicked() {
+                            cam_kf_add = Some(f);
+                            ui.close_menu();
+                        }
+                    });
                 }
+                if clicked { new_frame = Some(f); }
             }
         });
         ui.separator();
@@ -93,12 +134,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) -> bool {
         let layers = &state.project.layers;
         for layer in layers.iter().rev() {
             ui.horizontal(|ui| {
-                // Layer name column
                 ui.add_sized([header_w, row_h], egui::Label::new(
                     RichText::new(&layer.name).size(11.0)
                 ));
 
-                // Frame cells
                 for f in 1..=total {
                     let frame_data = layer.frames.iter().find(|fr| fr.frame == f);
                     let is_current = f == current;
@@ -115,10 +154,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) -> bool {
                         (Color32::from_gray(30), Color32::TRANSPARENT)
                     };
 
-                    let resp = draw_frame_cell(ui, frame_w, row_h, fill, stroke_col, is_kf, is_hold);
-                    if resp.clicked() {
-                        new_frame = Some(f);
-                    }
+                    let dot = if is_kf { Some(Color32::from_rgb(255, 200, 50)) } else { None };
+                    let resp = draw_frame_cell(ui, frame_w, row_h, fill, stroke_col, dot, is_hold);
+                    if resp.clicked() { new_frame = Some(f); }
                     if resp.secondary_clicked() {
                         if is_hold {
                             hold_released = Some((layer.id.clone(), f));
@@ -130,6 +168,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) -> bool {
             });
         }
 
+        // Apply deferred actions
         if let Some(f) = new_frame { state.set_frame(f); dirty = true; }
         if let Some((lid, f)) = hold_set { state.set_koma_hold(f, &lid); dirty = true; }
         if let Some((lid, f)) = hold_released { state.release_koma_hold(f, &lid); dirty = true; }
@@ -146,6 +185,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState) -> bool {
                 dirty = true;
             }
         }
+        if let Some((f, easing)) = cam_kf_easing {
+            if let Some(kf) = state.project.camera_track.keyframes.iter_mut().find(|k| k.frame == f) {
+                kf.easing = easing;
+                dirty = true;
+            }
+        }
     });
 
     dirty
@@ -155,7 +200,8 @@ fn draw_frame_cell(
     ui: &mut Ui,
     w: f32, h: f32,
     fill: Color32, stroke_col: Color32,
-    is_keyframe: bool, is_hold: bool,
+    kf_dot: Option<Color32>,
+    is_hold: bool,
 ) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::click());
     if ui.is_rect_visible(rect) {
@@ -164,13 +210,9 @@ fn draw_frame_cell(
         if stroke_col != Color32::TRANSPARENT {
             painter.rect_stroke(rect, 0.0, Stroke::new(1.0, stroke_col));
         }
-        if is_keyframe {
-            let cx = rect.center().x;
-            let cy = rect.center().y;
-            let s = 3.0;
-            painter.circle_filled(egui::pos2(cx, cy), s, Color32::from_rgb(255, 200, 50));
+        if let Some(dot_color) = kf_dot {
+            painter.circle_filled(rect.center(), 3.0, dot_color);
         } else if is_hold {
-            // Draw a small horizontal line to indicate hold
             let cy = rect.center().y;
             painter.hline(rect.left() + 2.0..=rect.right() - 2.0, cy, Stroke::new(2.0, Color32::from_gray(160)));
         }

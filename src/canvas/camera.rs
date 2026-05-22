@@ -1,8 +1,8 @@
-use crate::model::CameraKeyframe;
+use crate::model::{CameraEasing, CameraKeyframe};
 
 pub fn get_camera_at_frame(keyframes: &[CameraKeyframe], frame: u32) -> CameraKeyframe {
     if keyframes.is_empty() {
-        return CameraKeyframe { frame, x: 0.0, y: 0.0, scale: 1.0, rotation: 0.0, width: 1920.0, height: 1080.0 };
+        return CameraKeyframe { frame, x: 0.0, y: 0.0, scale: 1.0, rotation: 0.0, width: 1920.0, height: 1080.0, easing: CameraEasing::Linear };
     }
     if keyframes.len() == 1 || frame <= keyframes[0].frame {
         return keyframes[0].clone();
@@ -20,7 +20,8 @@ pub fn get_camera_at_frame(keyframes: &[CameraKeyframe], frame: u32) -> CameraKe
             break;
         }
     }
-    let t = (frame - before.frame) as f64 / (after.frame - before.frame) as f64;
+    let t_linear = (frame - before.frame) as f64 / (after.frame - before.frame) as f64;
+    let t = apply_easing(t_linear, before.easing);
     CameraKeyframe {
         frame,
         x: lerp(before.x, after.x, t),
@@ -29,6 +30,17 @@ pub fn get_camera_at_frame(keyframes: &[CameraKeyframe], frame: u32) -> CameraKe
         rotation: lerp(before.rotation, after.rotation, t),
         width: lerp(before.width, after.width, t),
         height: lerp(before.height, after.height, t),
+        easing: before.easing,
+    }
+}
+
+fn apply_easing(t: f64, easing: CameraEasing) -> f64 {
+    match easing {
+        CameraEasing::Linear    => t,
+        CameraEasing::EaseIn    => t * t,
+        CameraEasing::EaseOut   => 1.0 - (1.0 - t) * (1.0 - t),
+        CameraEasing::EaseInOut => t * t * (3.0 - 2.0 * t),
+        CameraEasing::Hold      => 0.0,
     }
 }
 

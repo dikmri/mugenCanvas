@@ -8,8 +8,19 @@ use serde::{Deserialize, Serialize};
 struct UserPrefs {
     brush: crate::model::BrushSettings,
     eraser: crate::model::BrushSettings,
+    #[serde(default)]
+    pen: Option<crate::model::BrushSettings>,
     show_grid: bool,
     grid_size: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ExportTarget { PngSeq, Gif, Mp4 }
+
+struct ExportDialog {
+    target: ExportTarget,
+    start: u32,
+    end: u32,
 }
 
 use crate::canvas::viewport::{fit_viewport, pointer_to_world, unrotate_point, world_to_screen_rotated, zoom_around};
@@ -47,6 +58,7 @@ pub struct MugenCanvasApp {
     // Export / status
     status_msg: Option<(String, Instant)>,
     gif_exporting: bool,
+    export_dialog: Option<ExportDialog>,
 
     // Frame clipboard (Ctrl+C / Ctrl+V)
     frame_clipboard: Option<HashMap<(i32, i32), Vec<u8>>>,
@@ -73,6 +85,7 @@ impl MugenCanvasApp {
             if let Some(prefs) = eframe::get_value::<UserPrefs>(storage, "user_prefs") {
                 state.brush = prefs.brush;
                 state.eraser = prefs.eraser;
+                if let Some(pen) = prefs.pen { state.pen = pen; }
                 state.show_grid = prefs.show_grid;
                 state.grid_size = prefs.grid_size;
             }
@@ -98,6 +111,7 @@ impl MugenCanvasApp {
             last_frame_time: None,
             status_msg: None,
             gif_exporting: false,
+            export_dialog: None,
             frame_clipboard: None,
             is_camera_dragging: false,
             camera_drag_world_start: (0.0, 0.0),
@@ -137,6 +151,7 @@ impl MugenCanvasApp {
             if !ctrl && !shift {
                 if i.key_pressed(Key::B) { self.state.selected_tool = Tool::Brush; }
                 if i.key_pressed(Key::E) { self.state.selected_tool = Tool::Eraser; }
+                if i.key_pressed(Key::P) { self.state.selected_tool = Tool::Pen; }
                 if i.key_pressed(Key::G) { self.state.selected_tool = Tool::Fill; }
                 if i.key_pressed(Key::H) { self.state.selected_tool = Tool::Hand; }
                 if i.key_pressed(Key::Z) { self.state.selected_tool = Tool::Zoom; }
@@ -346,7 +361,7 @@ impl MugenCanvasApp {
                             self.dirty = true;
                         }
                     }
-                } else if self.state.selected_tool == Tool::Brush || self.state.selected_tool == Tool::Eraser {
+                } else if matches!(self.state.selected_tool, Tool::Brush | Tool::Eraser | Tool::Pen) {
                     if self.state.can_paint() {
                         let layer_id = self.state.selected_layer_id.clone();
                         let frame = self.state.current_frame;
@@ -357,7 +372,9 @@ impl MugenCanvasApp {
                         if let Some((lx, ly)) = local_pos {
                             let (wx, wy) = pointer_to_world(lx, ly, panel_w, panel_h, &self.state.viewport);
                             let mut settings = self.state.active_brush().clone();
-                            settings.size *= self.current_pressure;
+                            if self.state.selected_tool == Tool::Brush {
+                                settings.size *= self.current_pressure;
+                            }
                             let is_eraser = self.state.selected_tool == Tool::Eraser;
                             self.canvas.draw_segment_to_tiles(&layer_id, frame, (wx, wy), (wx, wy), &settings, is_eraser);
                             self.last_paint_pos = Some((wx, wy));
@@ -421,7 +438,9 @@ impl MugenCanvasApp {
                             let layer_id = self.state.selected_layer_id.clone();
                             let frame = self.state.current_frame;
                             let mut settings = self.state.active_brush().clone();
-                            settings.size *= self.current_pressure;
+                            if self.state.selected_tool == Tool::Brush {
+                                settings.size *= self.current_pressure;
+                            }
                             let is_eraser = self.state.selected_tool == Tool::Eraser;
                             self.canvas.draw_segment_to_tiles(&layer_id, frame, last, (wx, wy), &settings, is_eraser);
                             self.last_paint_pos = Some((wx, wy));
@@ -639,7 +658,12 @@ impl MugenCanvasApp {
         self.show_status(format!("フレーム {} に貼り付けました", frame));
     }
 
-    fn do_export_png_sequence(&mut self) {
+    fn open_export_dialog(&mut self, target: ExportTarget) {
+        let total = self.state.project.settings.total_frames;
+        self.export_dialog = Some(ExportDialog { target, start: 1, end: total });
+    }
+
+    fn run_export_png_sequence(&mut self, start: u32, end: u32) {
         let dir = match rfd::FileDialog::new()
             .set_title("連番PNG書き出し先フォルダを選択")
             .pick_folder()
@@ -649,19 +673,18 @@ impl MugenCanvasApp {
         };
         let kf = get_camera_at_frame(&self.state.project.camera_track.keyframes, 1);
         let layers = self.state.project.layers.clone();
-        let total = self.state.project.settings.total_frames;
         let (cam_x, cam_y, cam_w, cam_h) = (kf.x as f32, kf.y as f32, kf.width as u32, kf.height as u32);
-
+        let count = end - start + 1;
         self.show_status("連番PNG書き出し中...");
-        match io::export_png_sequence(&dir, &self.canvas, &layers, total, cam_x, cam_y, cam_w, cam_h, |cur, tot| {
+        match io::export_png_sequence(&dir, &self.canvas, &layers, start, end, cam_x, cam_y, cam_w, cam_h, |cur, tot| {
             eprintln!("[PNG seq] frame {}/{}", cur, tot);
         }) {
-            Ok(()) => self.show_status(format!("連番PNG書き出し完了 ({} フレーム) → {}", total, dir)),
+            Ok(()) => self.show_status(format!("連番PNG書き出し完了 ({} フレーム) → {}", count, dir)),
             Err(e) => self.show_status(format!("連番PNG書き出し失敗: {}", e)),
         }
     }
 
-    fn do_export_gif(&mut self) {
+    fn run_export_gif(&mut self, start: u32, end: u32) {
         if self.gif_exporting { return; }
         let path = match rfd::FileDialog::new()
             .add_filter("GIF", &["gif"])
@@ -673,20 +696,95 @@ impl MugenCanvasApp {
         };
         let kf = get_camera_at_frame(&self.state.project.camera_track.keyframes, 1);
         let layers = self.state.project.layers.clone();
-        let total = self.state.project.settings.total_frames;
         let fps = self.state.project.settings.fps;
         let (cam_x, cam_y, cam_w, cam_h) = (kf.x as f32, kf.y as f32, kf.width as u32, kf.height as u32);
-
         self.gif_exporting = true;
         self.show_status("GIF書き出し中...");
-
-        match io::export_gif(&path, &self.canvas, &layers, total, fps, cam_x, cam_y, cam_w, cam_h, |cur, tot| {
+        match io::export_gif(&path, &self.canvas, &layers, start, end, fps, cam_x, cam_y, cam_w, cam_h, |cur, tot| {
             eprintln!("[GIF] frame {}/{}", cur, tot);
         }) {
             Ok(()) => self.show_status("GIFを書き出しました"),
             Err(e) => self.show_status(format!("GIF書き出し失敗: {}", e)),
         }
         self.gif_exporting = false;
+    }
+
+    fn run_export_mp4(&mut self, start: u32, end: u32) {
+        let path = match rfd::FileDialog::new()
+            .add_filter("MP4", &["mp4"])
+            .set_file_name("animation.mp4")
+            .save_file()
+        {
+            Some(p) => p.to_string_lossy().to_string(),
+            None => return,
+        };
+        let kf = get_camera_at_frame(&self.state.project.camera_track.keyframes, 1);
+        let layers = self.state.project.layers.clone();
+        let fps = self.state.project.settings.fps;
+        let (cam_x, cam_y, cam_w, cam_h) = (kf.x as f32, kf.y as f32, kf.width as u32, kf.height as u32);
+        self.show_status("MP4書き出し中... (ffmpeg実行中)");
+        match io::export_mp4(&path, &self.canvas, &layers, start, end, fps, cam_x, cam_y, cam_w, cam_h, |cur, tot| {
+            eprintln!("[MP4] frame {}/{}", cur, tot);
+        }) {
+            Ok(()) => self.show_status("MP4を書き出しました"),
+            Err(e) => self.show_status(format!("MP4書き出し失敗: {}", e)),
+        }
+    }
+
+    fn show_export_dialog(&mut self, ctx: &egui::Context) {
+        if self.export_dialog.is_none() { return; }
+        let total = self.state.project.settings.total_frames;
+        let (target, mut start, mut end) = {
+            let d = self.export_dialog.as_ref().unwrap();
+            (d.target, d.start, d.end)
+        };
+
+        let mut close = false;
+        let mut execute = false;
+
+        egui::Window::new("書き出し設定")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                let label = match target {
+                    ExportTarget::PngSeq => "連番PNG書き出し",
+                    ExportTarget::Gif    => "GIF書き出し",
+                    ExportTarget::Mp4    => "MP4書き出し",
+                };
+                ui.heading(label);
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label("開始フレーム:");
+                    ui.add(egui::DragValue::new(&mut start).range(1..=end).speed(1.0));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("終了フレーム:");
+                    ui.add(egui::DragValue::new(&mut end).range(start..=total).speed(1.0));
+                });
+                ui.label(egui::RichText::new(format!("({} フレーム)", end.saturating_sub(start) + 1)).size(11.0).color(egui::Color32::GRAY));
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui.button("書き出し").clicked() { execute = true; }
+                    if ui.button("キャンセル").clicked() { close = true; }
+                });
+            });
+
+        if let Some(d) = self.export_dialog.as_mut() {
+            d.start = start;
+            d.end = end;
+        }
+
+        if execute {
+            self.export_dialog = None;
+            match target {
+                ExportTarget::PngSeq => self.run_export_png_sequence(start, end),
+                ExportTarget::Gif    => self.run_export_gif(start, end),
+                ExportTarget::Mp4    => self.run_export_mp4(start, end),
+            }
+        } else if close {
+            self.export_dialog = None;
+        }
     }
 }
 
@@ -726,6 +824,7 @@ impl eframe::App for MugenCanvasApp {
         let prefs = UserPrefs {
             brush: self.state.brush.clone(),
             eraser: self.state.eraser.clone(),
+            pen: Some(self.state.pen.clone()),
             show_grid: self.state.show_grid,
             grid_size: self.state.grid_size,
         };
@@ -769,14 +868,18 @@ impl eframe::App for MugenCanvasApp {
                 TopbarAction::Open => self.do_open(),
                 TopbarAction::Save => self.do_save(),
                 TopbarAction::ExportPng => self.do_export_png(),
-                TopbarAction::ExportPngSequence => self.do_export_png_sequence(),
-                TopbarAction::ExportGif => self.do_export_gif(),
+                TopbarAction::ExportPngSequence => self.open_export_dialog(ExportTarget::PngSeq),
+                TopbarAction::ExportGif => self.open_export_dialog(ExportTarget::Gif),
+                TopbarAction::ExportMp4 => self.open_export_dialog(ExportTarget::Mp4),
                 TopbarAction::Undo => self.do_undo(),
                 TopbarAction::Redo => self.do_redo(),
                 TopbarAction::ToggleGrid => { self.state.show_grid = !self.state.show_grid; self.dirty = true; }
                 TopbarAction::None => {}
             }
         });
+
+        // ── Export dialog (modal overlay) ─────────────────────────────────────
+        self.show_export_dialog(ctx);
 
         // ── Status bar ────────────────────────────────────────────────────────
         egui::TopBottomPanel::bottom("statusbar").show(ctx, |ui| {
@@ -883,7 +986,7 @@ impl eframe::App for MugenCanvasApp {
             let cursor = match self.state.selected_tool {
                 _ if self.is_space_down || self.state.selected_tool == Tool::Hand =>
                     egui::CursorIcon::Grabbing,
-                Tool::Brush | Tool::Eraser => egui::CursorIcon::Crosshair,
+                Tool::Brush | Tool::Eraser | Tool::Pen => egui::CursorIcon::Crosshair,
                 Tool::Zoom => egui::CursorIcon::ZoomIn,
                 Tool::Hand => egui::CursorIcon::Grab,
                 Tool::Rotate => egui::CursorIcon::AllScroll,

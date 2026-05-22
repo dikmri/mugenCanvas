@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 pub enum Tool {
     Brush,
     Eraser,
+    Pen,
     Fill,
     Hand,
     Zoom,
@@ -30,6 +31,33 @@ impl Default for ProjectSettings {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CameraEasing {
+    #[default]
+    Linear,
+    EaseIn,
+    EaseOut,
+    EaseInOut,
+    Hold,
+}
+
+impl CameraEasing {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Linear    => "リニア",
+            Self::EaseIn    => "イーズイン",
+            Self::EaseOut   => "イーズアウト",
+            Self::EaseInOut => "イーズインアウト",
+            Self::Hold      => "ホールド",
+        }
+    }
+
+    pub fn all() -> [CameraEasing; 5] {
+        [Self::Linear, Self::EaseIn, Self::EaseOut, Self::EaseInOut, Self::Hold]
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CameraKeyframe {
@@ -40,6 +68,8 @@ pub struct CameraKeyframe {
     pub rotation: f64,
     pub width: f64,
     pub height: f64,
+    #[serde(default)]
+    pub easing: CameraEasing,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,7 +89,7 @@ impl Default for CameraTrack {
             locked: false,
             keyframes: vec![CameraKeyframe {
                 frame: 1, x: 0.0, y: 0.0, scale: 1.0, rotation: 0.0,
-                width: 1920.0, height: 1080.0,
+                width: 1920.0, height: 1080.0, easing: CameraEasing::Linear,
             }],
         }
     }
@@ -82,6 +112,8 @@ pub struct AnimationLayer {
     pub visible: bool,
     pub locked: bool,
     pub frames: Vec<AnimationFrame>,
+    #[serde(default)]
+    pub clipping: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -171,6 +203,7 @@ pub fn make_layer(id: &str, name: &str, total_frames: u32) -> AnimationLayer {
         name: name.to_string(),
         visible: true,
         locked: false,
+        clipping: false,
         frames: (1..=total_frames).map(|f| AnimationFrame {
             frame: f,
             drawing_id: None,

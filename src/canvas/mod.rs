@@ -70,7 +70,7 @@ impl CanvasState {
                 let tile = self.get_or_create_tile_mut(layer_id, frame, tx, ty);
                 let tile_ox = (tx * TILE_SIZE) as f32;
                 let tile_oy = (ty * TILE_SIZE) as f32;
-                draw_segment(tile, tile_ox, tile_oy, from, to, settings.size, cr, cg, cb, settings.opacity, is_eraser);
+                draw_segment(tile, tile_ox, tile_oy, from, to, settings.size, cr, cg, cb, settings.opacity, is_eraser, settings.anti_alias);
             }
         }
     }
@@ -197,21 +197,28 @@ impl CanvasState {
             }
         }
 
+        let mut clip_alpha: Vec<u8> = vec![0u8; screen_w * screen_h];
         for layer in layers {
             if !layer.visible { continue; }
-            if let Some(src) = resolve_layer_frame(layer, current_frame) {
-                self.blit_layer(&mut out, screen_w, screen_h, &layer.id, src, vp, 1.0, None);
+            if !layer.clipping {
+                if let Some(src) = resolve_layer_frame(layer, current_frame) {
+                    clip_alpha = self.capture_layer_alpha(screen_w, screen_h, &layer.id, src, vp);
+                    self.blit_layer(&mut out, screen_w, screen_h, &layer.id, src, vp, 1.0, None, None);
+                } else {
+                    clip_alpha.iter_mut().for_each(|a| *a = 0);
+                }
+            } else if let Some(src) = resolve_layer_frame(layer, current_frame) {
+                self.blit_layer(&mut out, screen_w, screen_h, &layer.id, src, vp, 1.0, None, Some(&clip_alpha));
             }
         }
 
-        // Draw camera frame outline
         out
     }
 
     fn blit_layer(
         &self, out: &mut [u8], ow: usize, oh: usize,
         layer_id: &str, frame: u32, vp: &Viewport, alpha: f32,
-        tint: Option<[u8; 3]>,
+        tint: Option<[u8; 3]>, clip: Option<&[u8]>,
     ) {
         let lf: LfKey = (layer_id.to_string(), frame);
 
@@ -225,7 +232,7 @@ impl CanvasState {
             for (tx, ty) in coords {
                 if let Some(tile) = self.tiles.get(&(layer_id.to_string(), frame, tx, ty)) {
                     let (sx, sy) = world_to_screen((tx * TILE_SIZE) as f32, (ty * TILE_SIZE) as f32, vp);
-                    blit_scaled(out, ow, oh, tile, TS, sx as i32, sy as i32, scaled, alpha, tint);
+                    blit_scaled(out, ow, oh, tile, TS, sx as i32, sy as i32, scaled, alpha, tint, clip);
                 }
             }
         } else {
@@ -268,13 +275,18 @@ impl CanvasState {
                         let src_a_raw = tile[si + 3];
                         if src_a_raw == 0 { continue; }
 
+                        let clip_a = if let Some(c) = clip {
+                            c[py * ow + px] as f32 / 255.0
+                        } else { 1.0 };
+                        if clip_a == 0.0 { continue; }
+
                         let (sr, sg, sb) = if let Some([tr, tg, tb]) = tint {
                             (tr, tg, tb)
                         } else {
                             (tile[si], tile[si + 1], tile[si + 2])
                         };
 
-                        let sa = src_a_raw as f32 / 255.0 * alpha;
+                        let sa = src_a_raw as f32 / 255.0 * alpha * clip_a;
                         let di = px * 4;
                         let da = row[di + 3] as f32 / 255.0;
                         let oa = sa + da * (1.0 - sa);
@@ -296,7 +308,7 @@ impl CanvasState {
         layer_id: &str, frame: u32, vp: &Viewport,
         tint: [u8; 3], alpha: f32,
     ) {
-        self.blit_layer(out, ow, oh, layer_id, frame, vp, alpha, Some(tint));
+        self.blit_layer(out, ow, oh, layer_id, frame, vp, alpha, Some(tint), None);
     }
 
     /// Export a world-space region as raw RGBA pixels (for PNG/GIF export).
@@ -309,9 +321,13 @@ impl CanvasState {
     ) -> Vec<u8> {
         let (w, h) = (width as usize, height as usize);
         let mut out = vec![255u8; w * h * 4];
+        let mut clip_alpha = vec![0u8; w * h];
 
         for layer in layers {
             if !layer.visible { continue; }
+            if !layer.clipping {
+                clip_alpha.iter_mut().for_each(|a| *a = 0);
+            }
             let src_frame = match resolve_layer_frame(layer, frame) {
                 Some(f) => f,
                 None => continue,
@@ -335,12 +351,20 @@ impl CanvasState {
                                 let tsx = (ox - tile_wx as i32) as usize + col;
                                 let tsy = (oy - tile_wy as i32) as usize + row;
                                 let si = (tsy * TS + tsx) * 4;
-                                let src_a = tile[si + 3];
-                                if src_a == 0 { continue; }
+                                let raw_a = tile[si + 3];
+                                if raw_a == 0 { continue; }
                                 let dx = (ox - src_x as i32) as usize + col;
                                 let dy = (oy - src_y as i32) as usize + row;
                                 if dx >= w || dy >= h { continue; }
-                                let di = (dy * w + dx) * 4;
+                                let pidx = dy * w + dx;
+                                let di = pidx * 4;
+                                let src_a = if layer.clipping {
+                                    (raw_a as u32 * clip_alpha[pidx] as u32 / 255) as u8
+                                } else {
+                                    clip_alpha[pidx] = raw_a;
+                                    raw_a
+                                };
+                                if src_a == 0 { continue; }
                                 let sa = src_a as f32 / 255.0;
                                 let da = out[di + 3] as f32 / 255.0;
                                 let oa = sa + da * (1.0 - sa);
@@ -358,6 +382,73 @@ impl CanvasState {
             }
         }
         out
+    }
+
+    /// Return the raw per-pixel alpha of a layer in screen space (for clipping mask).
+    fn capture_layer_alpha(&self, ow: usize, oh: usize, layer_id: &str, frame: u32, vp: &Viewport) -> Vec<u8> {
+        let mut alpha = vec![0u8; ow * oh];
+        let lf: LfKey = (layer_id.to_string(), frame);
+
+        if vp.rotation == 0.0 {
+            let coords: Vec<(i32, i32)> = match self.tile_sets.get(&lf) {
+                Some(s) => s.iter().cloned().collect(),
+                None => return alpha,
+            };
+            let scaled = (TILE_SIZE as f32 * vp.zoom) as i32;
+            if scaled <= 0 { return alpha; }
+            let scale = TS as f32 / scaled as f32;
+            for (tx, ty) in coords {
+                if let Some(tile) = self.tiles.get(&(layer_id.to_string(), frame, tx, ty)) {
+                    let (sx_f, sy_f) = world_to_screen((tx * TILE_SIZE) as f32, (ty * TILE_SIZE) as f32, vp);
+                    let dst_x = sx_f as i32;
+                    let dst_y = sy_f as i32;
+                    let x0 = dst_x.max(0) as usize;
+                    let y0 = dst_y.max(0) as usize;
+                    let x1 = (dst_x + scaled).min(ow as i32) as usize;
+                    let y1 = (dst_y + scaled).min(oh as i32) as usize;
+                    for py in y0..y1 {
+                        for px in x0..x1 {
+                            let spx = (((px as i32 - dst_x) as f32 * scale) as usize).min(TS - 1);
+                            let spy = (((py as i32 - dst_y) as f32 * scale) as usize).min(TS - 1);
+                            alpha[py * ow + px] = tile[(spy * TS + spx) * 4 + 3];
+                        }
+                    }
+                }
+            }
+        } else {
+            let tile_map: HashMap<(i32, i32), &[u8]> = match self.tile_sets.get(&lf) {
+                Some(s) => s.iter().filter_map(|&(tx, ty)| {
+                    self.tiles.get(&(layer_id.to_string(), frame, tx, ty))
+                        .map(|v| ((tx, ty), v.as_slice()))
+                }).collect(),
+                None => return alpha,
+            };
+            if tile_map.is_empty() { return alpha; }
+            let cx = ow as f32 / 2.0;
+            let cy = oh as f32 / 2.0;
+            let cos_r = vp.rotation.cos();
+            let sin_r = vp.rotation.sin();
+            let inv_zoom = 1.0 / vp.zoom;
+            let inv_tile = 1.0 / TILE_SIZE as f32;
+            for py in 0..oh {
+                let dy = py as f32 - cy;
+                for px in 0..ow {
+                    let dx = px as f32 - cx;
+                    let ux = cx + dx * cos_r + dy * sin_r;
+                    let uy = cy - dx * sin_r + dy * cos_r;
+                    let wx = (ux - vp.offset_x) * inv_zoom;
+                    let wy = (uy - vp.offset_y) * inv_zoom;
+                    let tx = (wx * inv_tile).floor() as i32;
+                    let ty_i = (wy * inv_tile).floor() as i32;
+                    if let Some(tile) = tile_map.get(&(tx, ty_i)) {
+                        let lx = ((wx - (tx * TILE_SIZE) as f32).max(0.0) as usize).min(TS - 1);
+                        let ly = ((wy - (ty_i * TILE_SIZE) as f32).max(0.0) as usize).min(TS - 1);
+                        alpha[py * ow + px] = tile[(ly * TS + lx) * 4 + 3];
+                    }
+                }
+            }
+        }
+        alpha
     }
 
     /// Return all tile data for a layer-frame as (tx, ty, rgba_bytes).
@@ -380,7 +471,7 @@ fn blit_scaled(
     out: &mut [u8], out_w: usize, out_h: usize,
     tile: &[u8], tile_size: usize,
     dst_x: i32, dst_y: i32, dst_size: i32,
-    alpha: f32, tint: Option<[u8; 3]>,
+    alpha: f32, tint: Option<[u8; 3]>, clip: Option<&[u8]>,
 ) {
     if dst_size <= 0 { return; }
     let x0 = dst_x.max(0) as usize;
@@ -405,13 +496,18 @@ fn blit_scaled(
                 let src_a_raw = tile[si + 3];
                 if src_a_raw == 0 { continue; }
 
+                let clip_a = if let Some(c) = clip {
+                    c[(y0 + ry) * out_w + px] as f32 / 255.0
+                } else { 1.0 };
+                if clip_a == 0.0 { continue; }
+
                 let (sr, sg, sb) = if let Some([tr, tg, tb]) = tint {
                     (tr, tg, tb)
                 } else {
                     (tile[si], tile[si + 1], tile[si + 2])
                 };
 
-                let sa = src_a_raw as f32 / 255.0 * alpha;
+                let sa = src_a_raw as f32 / 255.0 * alpha * clip_a;
                 let di = px * 4;
                 let da = row[di + 3] as f32 / 255.0;
                 let oa = sa + da * (1.0 - sa);
