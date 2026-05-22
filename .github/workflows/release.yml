@@ -16,6 +16,7 @@ jobs:
   build:
     name: Build (${{ matrix.asset_name }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -30,7 +31,8 @@ jobs:
             artifact: mugen-canvas
             asset_name: mugen-canvas-linux-x86_64
 
-          - os: macos-13
+          # x86_64 は ARM ランナー上でクロスコンパイル (macos-13 Intel ランナーは枯渇しやすい)
+          - os: macos-latest
             target: x86_64-apple-darwin
             artifact: mugen-canvas
             asset_name: mugen-canvas-macos-x86_64
