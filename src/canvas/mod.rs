@@ -229,38 +229,41 @@ impl CanvasState {
                 }
             }
         } else {
-            // Rotation path: per-pixel inverse transform (sample world from each screen pixel)
-            let tile_set: std::collections::HashSet<(i32, i32)> = match self.tile_sets.get(&lf) {
-                Some(s) => s.clone(),
+            // Rotation path: per-pixel inverse transform (sample world from each screen pixel).
+            // Pre-build a (tx,ty)->tile map to eliminate String allocations inside the hot loop.
+            let tile_map: HashMap<(i32, i32), &[u8]> = match self.tile_sets.get(&lf) {
+                Some(s) => s.iter().filter_map(|&(tx, ty)| {
+                    self.tiles.get(&(layer_id.to_string(), frame, tx, ty))
+                        .map(|v| ((tx, ty), v.as_slice()))
+                }).collect(),
                 None => return,
             };
-            if tile_set.is_empty() { return; }
+            if tile_map.is_empty() { return; }
 
             let cx = ow as f32 / 2.0;
             let cy = oh as f32 / 2.0;
-            // Inverse rotation: rotate by -vp.rotation => cos(-θ)=cos(θ), sin(-θ)=-sin(θ)
             let cos_r = vp.rotation.cos();
             let sin_r = vp.rotation.sin();
+            let inv_zoom = 1.0 / vp.zoom;
+            let inv_tile = 1.0 / TILE_SIZE as f32;
+            let off_x = vp.offset_x;
+            let off_y = vp.offset_y;
 
-            for py in 0..oh {
+            use rayon::prelude::*;
+            out.par_chunks_mut(ow * 4).enumerate().for_each(|(py, row)| {
+                let dy = py as f32 - cy;
                 for px in 0..ow {
                     let dx = px as f32 - cx;
-                    let dy = py as f32 - cy;
-                    // Unrotate screen point (same formula as unrotate_point / pointer_to_world)
                     let ux = cx + dx * cos_r + dy * sin_r;
                     let uy = cy - dx * sin_r + dy * cos_r;
-                    // Screen → world
-                    let wx = (ux - vp.offset_x) / vp.zoom;
-                    let wy = (uy - vp.offset_y) / vp.zoom;
-                    // Tile index
-                    let tx = (wx / TILE_SIZE as f32).floor() as i32;
-                    let ty = (wy / TILE_SIZE as f32).floor() as i32;
+                    let wx = (ux - off_x) * inv_zoom;
+                    let wy = (uy - off_y) * inv_zoom;
+                    let tx = (wx * inv_tile).floor() as i32;
+                    let ty_i = (wy * inv_tile).floor() as i32;
 
-                    if !tile_set.contains(&(tx, ty)) { continue; }
-
-                    if let Some(tile) = self.tiles.get(&(layer_id.to_string(), frame, tx, ty)) {
+                    if let Some(tile) = tile_map.get(&(tx, ty_i)) {
                         let lx = ((wx - (tx * TILE_SIZE) as f32).max(0.0) as usize).min(TS - 1);
-                        let ly = ((wy - (ty * TILE_SIZE) as f32).max(0.0) as usize).min(TS - 1);
+                        let ly = ((wy - (ty_i * TILE_SIZE) as f32).max(0.0) as usize).min(TS - 1);
                         let si = (ly * TS + lx) * 4;
                         let src_a_raw = tile[si + 3];
                         if src_a_raw == 0 { continue; }
@@ -272,19 +275,19 @@ impl CanvasState {
                         };
 
                         let sa = src_a_raw as f32 / 255.0 * alpha;
-                        let di = (py * ow + px) * 4;
-                        let da = out[di + 3] as f32 / 255.0;
+                        let di = px * 4;
+                        let da = row[di + 3] as f32 / 255.0;
                         let oa = sa + da * (1.0 - sa);
                         if oa > 0.001 {
                             let inv = 1.0 / oa;
-                            out[di]     = ((sr as f32 * sa + out[di]     as f32 * da * (1.0 - sa)) * inv) as u8;
-                            out[di + 1] = ((sg as f32 * sa + out[di + 1] as f32 * da * (1.0 - sa)) * inv) as u8;
-                            out[di + 2] = ((sb as f32 * sa + out[di + 2] as f32 * da * (1.0 - sa)) * inv) as u8;
-                            out[di + 3] = (oa * 255.0) as u8;
+                            row[di]     = ((sr as f32 * sa + row[di]     as f32 * da * (1.0 - sa)) * inv) as u8;
+                            row[di + 1] = ((sg as f32 * sa + row[di + 1] as f32 * da * (1.0 - sa)) * inv) as u8;
+                            row[di + 2] = ((sb as f32 * sa + row[di + 2] as f32 * da * (1.0 - sa)) * inv) as u8;
+                            row[di + 3] = (oa * 255.0) as u8;
                         }
                     }
                 }
-            }
+            });
         }
     }
 
@@ -387,31 +390,38 @@ fn blit_scaled(
     if x0 >= x1 || y0 >= y1 { return; }
 
     let scale = tile_size as f32 / dst_size as f32;
-    for py in y0..y1 {
-        for px in x0..x1 {
-            let spx = (((px as i32 - dst_x) as f32 * scale) as usize).min(tile_size - 1);
+
+    use rayon::prelude::*;
+    // Process only the affected rows in parallel
+    out[y0 * out_w * 4..y1 * out_w * 4]
+        .par_chunks_mut(out_w * 4)
+        .enumerate()
+        .for_each(|(ry, row)| {
+            let py = y0 + ry;
             let spy = (((py as i32 - dst_y) as f32 * scale) as usize).min(tile_size - 1);
-            let si = (spy * tile_size + spx) * 4;
-            let src_a_raw = tile[si + 3];
-            if src_a_raw == 0 { continue; }
+            for px in x0..x1 {
+                let spx = (((px as i32 - dst_x) as f32 * scale) as usize).min(tile_size - 1);
+                let si = (spy * tile_size + spx) * 4;
+                let src_a_raw = tile[si + 3];
+                if src_a_raw == 0 { continue; }
 
-            let (sr, sg, sb) = if let Some([tr, tg, tb]) = tint {
-                (tr, tg, tb)
-            } else {
-                (tile[si], tile[si + 1], tile[si + 2])
-            };
+                let (sr, sg, sb) = if let Some([tr, tg, tb]) = tint {
+                    (tr, tg, tb)
+                } else {
+                    (tile[si], tile[si + 1], tile[si + 2])
+                };
 
-            let sa = src_a_raw as f32 / 255.0 * alpha;
-            let di = (py * out_w + px) * 4;
-            let da = out[di + 3] as f32 / 255.0;
-            let oa = sa + da * (1.0 - sa);
-            if oa > 0.001 {
-                let inv = 1.0 / oa;
-                out[di]     = ((sr as f32 * sa + out[di]     as f32 * da * (1.0 - sa)) * inv) as u8;
-                out[di + 1] = ((sg as f32 * sa + out[di + 1] as f32 * da * (1.0 - sa)) * inv) as u8;
-                out[di + 2] = ((sb as f32 * sa + out[di + 2] as f32 * da * (1.0 - sa)) * inv) as u8;
-                out[di + 3] = (oa * 255.0) as u8;
+                let sa = src_a_raw as f32 / 255.0 * alpha;
+                let di = px * 4;
+                let da = row[di + 3] as f32 / 255.0;
+                let oa = sa + da * (1.0 - sa);
+                if oa > 0.001 {
+                    let inv = 1.0 / oa;
+                    row[di]     = ((sr as f32 * sa + row[di]     as f32 * da * (1.0 - sa)) * inv) as u8;
+                    row[di + 1] = ((sg as f32 * sa + row[di + 1] as f32 * da * (1.0 - sa)) * inv) as u8;
+                    row[di + 2] = ((sb as f32 * sa + row[di + 2] as f32 * da * (1.0 - sa)) * inv) as u8;
+                    row[di + 3] = (oa * 255.0) as u8;
+                }
             }
-        }
-    }
+        });
 }

@@ -186,7 +186,7 @@ impl MugenCanvasApp {
         let (w, h) = self.canvas_panel_size;
         if w == 0 || h == 0 || !self.dirty { return; }
 
-        let pixels = self.canvas.composite(
+        let mut final_pixels = self.canvas.composite(
             &self.state.project.layers,
             &self.state.viewport,
             self.state.current_frame,
@@ -194,12 +194,6 @@ impl MugenCanvasApp {
             &self.state.onion_skin_settings,
             w, h,
         );
-
-        // Draw camera frame outline directly into pixel buffer
-        draw_camera_overlay(&mut pixels.clone(), &mut self.canvas, &self.state, w, h);
-        // (overlay drawn into separate pass below to avoid borrow issues)
-
-        let mut final_pixels = pixels;
         if self.state.show_grid {
             draw_grid_onto(&mut final_pixels, &self.state, w, h);
         }
@@ -921,10 +915,6 @@ fn draw_line(pixels: &mut [u8], pw: usize, ph: usize, x0: i32, y0: i32, x1: i32,
         if e2 > -dy { err -= dy; x += sx; }
         if e2 < dx  { err += dx; y += sy; }
     }
-}
-
-fn draw_camera_overlay(_pixels: &mut Vec<u8>, _canvas: &mut CanvasState, _state: &AppState, _w: usize, _h: usize) {
-    // stub: actual overlay is done in draw_camera_overlay_onto
 }
 
 // ─── Grid overlay ─────────────────────────────────────────────────────────────
