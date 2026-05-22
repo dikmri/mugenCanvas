@@ -13,6 +13,9 @@ pub struct AppState {
     pub onion_skin_settings: OnionSkinSettings,
     pub project_path: Option<String>,
     pub layer_counter: u32,
+    // Grid
+    pub show_grid: bool,
+    pub grid_size: u32,
 }
 
 impl Default for AppState {
@@ -34,6 +37,8 @@ impl Default for AppState {
             onion_skin_settings: OnionSkinSettings::default(),
             project_path: None,
             layer_counter: 2,
+            show_grid: false,
+            grid_size: 100,
         }
     }
 }

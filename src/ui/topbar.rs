@@ -11,6 +11,7 @@ pub enum TopbarAction {
     ExportGif,
     Undo,
     Redo,
+    ToggleGrid,
     None,
 }
 
@@ -35,6 +36,13 @@ pub fn show(ui: &mut Ui, state: &mut AppState, can_undo: bool, can_redo: bool) -
         if ui.button(ph::UPLOAD_SIMPLE).on_hover_text("現在フレームをPNG書き出し").clicked()    { action = TopbarAction::ExportPng; }
         if ui.button(ph::IMAGES).on_hover_text("連番PNG書き出し (全フレーム)").clicked()         { action = TopbarAction::ExportPngSequence; }
         if ui.button(ph::FILM_STRIP).on_hover_text("GIFアニメーション書き出し").clicked()        { action = TopbarAction::ExportGif; }
+        ui.separator();
+
+        let grid_icon = if state.show_grid { ph::GRID_FOUR } else { ph::GRID_FOUR };
+        let grid_tint = if state.show_grid { egui::Color32::from_rgb(100, 180, 255) } else { egui::Color32::GRAY };
+        if ui.add(egui::Button::new(egui::RichText::new(grid_icon).color(grid_tint)))
+            .on_hover_text(format!("グリッド表示 (Ctrl+G)  現在: {}px", state.grid_size))
+            .clicked() { action = TopbarAction::ToggleGrid; }
         ui.separator();
 
         // Project info

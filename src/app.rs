@@ -46,6 +46,11 @@ pub struct MugenCanvasApp {
     is_camera_dragging: bool,
     camera_drag_world_start: (f32, f32),
     camera_drag_kf_start: Option<crate::model::CameraKeyframe>,
+
+    // Camera resize handle drag (corner index 0-3: TL, TR, BR, BL)
+    camera_resize_corner: Option<usize>,
+    camera_resize_world_start: (f32, f32),
+    camera_resize_kf_start: Option<crate::model::CameraKeyframe>,
 }
 
 impl MugenCanvasApp {
@@ -77,6 +82,9 @@ impl MugenCanvasApp {
             is_camera_dragging: false,
             camera_drag_world_start: (0.0, 0.0),
             camera_drag_kf_start: None,
+            camera_resize_corner: None,
+            camera_resize_world_start: (0.0, 0.0),
+            camera_resize_kf_start: None,
         }
     }
 
@@ -98,6 +106,7 @@ impl MugenCanvasApp {
             if ctrl && !shift && i.key_pressed(Key::O) { self.do_open(); }
             if ctrl && !shift && i.key_pressed(Key::N) { self.do_new(); }
             if ctrl && !shift && i.key_pressed(Key::R) { self.state.viewport.rotation = 0.0; self.dirty = true; }
+            if ctrl && !shift && i.key_pressed(Key::G) { self.state.show_grid = !self.state.show_grid; self.dirty = true; }
             if ctrl && !shift && i.key_pressed(Key::E) { self.state.viewport.rotation += 20.0_f32.to_radians(); self.dirty = true; }
             if ctrl && !shift && i.key_pressed(Key::Q) { self.state.viewport.rotation -= 20.0_f32.to_radians(); self.dirty = true; }
             if ctrl && !shift && i.key_pressed(Key::C) { self.do_copy_frame(); }
@@ -187,6 +196,9 @@ impl MugenCanvasApp {
         // (overlay drawn into separate pass below to avoid borrow issues)
 
         let mut final_pixels = pixels;
+        if self.state.show_grid {
+            draw_grid_onto(&mut final_pixels, &self.state, w, h);
+        }
         draw_camera_overlay_onto(&mut final_pixels, &self.state, w, h);
 
         let image = egui::ColorImage::from_rgba_unmultiplied([w, h], &final_pixels);
@@ -278,9 +290,32 @@ impl MugenCanvasApp {
                     if let Some((lx, ly)) = local_pos {
                         let (wx, wy) = pointer_to_world(lx, ly, panel_w, panel_h, &self.state.viewport);
                         let kf = get_camera_at_frame(&self.state.project.camera_track.keyframes, self.state.current_frame);
-                        self.is_camera_dragging = true;
-                        self.camera_drag_world_start = (wx, wy);
-                        self.camera_drag_kf_start = Some(kf);
+
+                        // Check if click is near a resize handle (corner)
+                        let cx_vp = panel_w / 2.0;
+                        let cy_vp = panel_h / 2.0;
+                        let corners_world = [
+                            (kf.x as f32,                    kf.y as f32),
+                            (kf.x as f32 + kf.width as f32,  kf.y as f32),
+                            (kf.x as f32 + kf.width as f32,  kf.y as f32 + kf.height as f32),
+                            (kf.x as f32,                    kf.y as f32 + kf.height as f32),
+                        ];
+                        let hit = corners_world.iter().enumerate().find(|(_, &(cwx, cwy))| {
+                            let (sx, sy) = world_to_screen_rotated(cwx, cwy, &self.state.viewport, cx_vp, cy_vp);
+                            let dx = lx - sx;
+                            let dy = ly - sy;
+                            dx * dx + dy * dy < 12.0 * 12.0
+                        }).map(|(i, _)| i);
+
+                        if let Some(corner) = hit {
+                            self.camera_resize_corner = Some(corner);
+                            self.camera_resize_world_start = (wx, wy);
+                            self.camera_resize_kf_start = Some(kf);
+                        } else {
+                            self.is_camera_dragging = true;
+                            self.camera_drag_world_start = (wx, wy);
+                            self.camera_drag_kf_start = Some(kf);
+                        }
                     }
                 } else if self.state.selected_tool == Tool::Zoom {
                     if let Some((lx, ly)) = local_pos {
@@ -326,7 +361,29 @@ impl MugenCanvasApp {
             }
 
             if primary_down {
-                if self.is_camera_dragging {
+                if let Some(corner) = self.camera_resize_corner {
+                    if let Some((lx, ly)) = local_pos {
+                        if let Some(ref kf_start) = self.camera_resize_kf_start.clone() {
+                            let (wx, wy) = pointer_to_world(lx, ly, panel_w, panel_h, &self.state.viewport);
+                            let dx = (wx - self.camera_resize_world_start.0) as f64;
+                            let dy = (wy - self.camera_resize_world_start.1) as f64;
+                            // corner 0=TL, 1=TR, 2=BR, 3=BL
+                            let (new_x, new_y, new_w, new_h) = match corner {
+                                0 => (kf_start.x + dx, kf_start.y + dy,
+                                      (kf_start.width  - dx).max(10.0), (kf_start.height - dy).max(10.0)),
+                                1 => (kf_start.x, kf_start.y + dy,
+                                      (kf_start.width  + dx).max(10.0), (kf_start.height - dy).max(10.0)),
+                                2 => (kf_start.x, kf_start.y,
+                                      (kf_start.width  + dx).max(10.0), (kf_start.height + dy).max(10.0)),
+                                _ => (kf_start.x + dx, kf_start.y,
+                                      (kf_start.width  - dx).max(10.0), (kf_start.height + dy).max(10.0)),
+                            };
+                            let frame = self.state.current_frame;
+                            self.upsert_camera_kf_rect(frame, new_x, new_y, new_w, new_h);
+                            self.dirty = true;
+                        }
+                    }
+                } else if self.is_camera_dragging {
                     if let Some((lx, ly)) = local_pos {
                         if let Some(ref kf_start) = self.camera_drag_kf_start.clone() {
                             let (wx, wy) = pointer_to_world(lx, ly, panel_w, panel_h, &self.state.viewport);
@@ -364,6 +421,8 @@ impl MugenCanvasApp {
                 self.is_panning = false;
                 self.is_camera_dragging = false;
                 self.camera_drag_kf_start = None;
+                self.camera_resize_corner = None;
+                self.camera_resize_kf_start = None;
                 self.last_paint_pos = None;
             }
         });
@@ -481,6 +540,31 @@ impl MugenCanvasApp {
         }
     }
 
+    fn draw_camera_handles(&self, painter: &egui::Painter, response: &egui::Response) {
+        let panel_rect = response.rect;
+        let (pw, ph) = (panel_rect.width(), panel_rect.height());
+        let cx = pw / 2.0;
+        let cy = ph / 2.0;
+        let vp = &self.state.viewport;
+        let kf = get_camera_at_frame(&self.state.project.camera_track.keyframes, self.state.current_frame);
+
+        let corners_world = [
+            (kf.x as f32,                    kf.y as f32),
+            (kf.x as f32 + kf.width as f32,  kf.y as f32),
+            (kf.x as f32 + kf.width as f32,  kf.y as f32 + kf.height as f32),
+            (kf.x as f32,                    kf.y as f32 + kf.height as f32),
+        ];
+        let handle_r = 6.0;
+        let fill = Color32::from_rgb(255, 255, 255);
+        let border = egui::Stroke::new(2.0, Color32::from_rgb(255, 75, 75));
+
+        for &(wx, wy) in &corners_world {
+            let (sx, sy) = world_to_screen_rotated(wx, wy, vp, cx, cy);
+            let sp = egui::pos2(panel_rect.min.x + sx, panel_rect.min.y + sy);
+            painter.circle(sp, handle_r, fill, border);
+        }
+    }
+
     fn upsert_camera_kf_pos(&mut self, frame: u32, x: f64, y: f64) {
         let interp = get_camera_at_frame(&self.state.project.camera_track.keyframes, frame);
         let kfs = &mut self.state.project.camera_track.keyframes;
@@ -492,6 +576,22 @@ impl MugenCanvasApp {
             new_kf.frame = frame;
             new_kf.x = x;
             new_kf.y = y;
+            kfs.push(new_kf);
+            kfs.sort_by_key(|k| k.frame);
+        }
+    }
+
+    fn upsert_camera_kf_rect(&mut self, frame: u32, x: f64, y: f64, w: f64, h: f64) {
+        let interp = get_camera_at_frame(&self.state.project.camera_track.keyframes, frame);
+        let kfs = &mut self.state.project.camera_track.keyframes;
+        if let Some(existing) = kfs.iter_mut().find(|k| k.frame == frame) {
+            existing.x = x; existing.y = y;
+            existing.width = w; existing.height = h;
+        } else {
+            let mut new_kf = interp;
+            new_kf.frame = frame;
+            new_kf.x = x; new_kf.y = y;
+            new_kf.width = w; new_kf.height = h;
             kfs.push(new_kf);
             kfs.sort_by_key(|k| k.frame);
         }
@@ -630,6 +730,7 @@ impl eframe::App for MugenCanvasApp {
                 TopbarAction::ExportGif => self.do_export_gif(),
                 TopbarAction::Undo => self.do_undo(),
                 TopbarAction::Redo => self.do_redo(),
+                TopbarAction::ToggleGrid => { self.state.show_grid = !self.state.show_grid; self.dirty = true; }
                 TopbarAction::None => {}
             }
         });
@@ -727,6 +828,11 @@ impl eframe::App for MugenCanvasApp {
                 painter.line_segment([egui::pos2(cr.x, cr.y - 20.0), egui::pos2(cr.x, cr.y + 20.0)], stroke);
             }
 
+            // Camera resize handles (Camera tool only)
+            if self.state.selected_tool == Tool::Camera && self.state.project.camera_track.visible {
+                self.draw_camera_handles(&painter, &response);
+            }
+
             // Handle input
             self.handle_canvas_input(&response, ctx);
 
@@ -796,4 +902,42 @@ fn draw_line(pixels: &mut [u8], pw: usize, ph: usize, x0: i32, y0: i32, x1: i32,
 
 fn draw_camera_overlay(_pixels: &mut Vec<u8>, _canvas: &mut CanvasState, _state: &AppState, _w: usize, _h: usize) {
     // stub: actual overlay is done in draw_camera_overlay_onto
+}
+
+// ─── Grid overlay ─────────────────────────────────────────────────────────────
+
+fn draw_grid_onto(pixels: &mut [u8], state: &AppState, w: usize, h: usize) {
+    let vp = &state.viewport;
+    let grid = state.grid_size as f32;
+    let color = [0x88u8, 0x88u8, 0x88u8, 0x60u8];
+    let cx = w as f32 / 2.0;
+    let cy = h as f32 / 2.0;
+
+    // Compute the world-space range visible on screen (unrotated)
+    // We draw lines that span the entire screen, spaced by grid_size in world units.
+    // First line offset: find the first grid line >= world_min for each axis.
+    let world_left  = (0.0 - vp.offset_x) / vp.zoom;
+    let world_right = (w as f32 - vp.offset_x) / vp.zoom;
+    let world_top   = (0.0 - vp.offset_y) / vp.zoom;
+    let world_bottom = (h as f32 - vp.offset_y) / vp.zoom;
+
+    let x_start = (world_left / grid).floor() as i32;
+    let x_end   = (world_right / grid).ceil()  as i32;
+    let y_start = (world_top / grid).floor()   as i32;
+    let y_end   = (world_bottom / grid).ceil() as i32;
+
+    // Vertical lines
+    for ix in x_start..=x_end {
+        let wx = ix as f32 * grid;
+        let (sx0, sy0) = world_to_screen_rotated(wx, world_top - grid, vp, cx, cy);
+        let (sx1, sy1) = world_to_screen_rotated(wx, world_bottom + grid, vp, cx, cy);
+        draw_line(pixels, w, h, sx0 as i32, sy0 as i32, sx1 as i32, sy1 as i32, color);
+    }
+    // Horizontal lines
+    for iy in y_start..=y_end {
+        let wy = iy as f32 * grid;
+        let (sx0, sy0) = world_to_screen_rotated(world_left - grid, wy, vp, cx, cy);
+        let (sx1, sy1) = world_to_screen_rotated(world_right + grid, wy, vp, cx, cy);
+        draw_line(pixels, w, h, sx0 as i32, sy0 as i32, sx1 as i32, sy1 as i32, color);
+    }
 }
