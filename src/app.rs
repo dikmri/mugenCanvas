@@ -51,6 +51,9 @@ pub struct MugenCanvasApp {
     camera_resize_corner: Option<usize>,
     camera_resize_world_start: (f32, f32),
     camera_resize_kf_start: Option<crate::model::CameraKeyframe>,
+
+    // Stylus pressure (0.0–1.0, default 1.0 when no touch/pen event)
+    current_pressure: f32,
 }
 
 impl MugenCanvasApp {
@@ -85,6 +88,7 @@ impl MugenCanvasApp {
             camera_resize_corner: None,
             camera_resize_world_start: (0.0, 0.0),
             camera_resize_kf_start: None,
+            current_pressure: 1.0,
         }
     }
 
@@ -349,7 +353,8 @@ impl MugenCanvasApp {
                         self.state.mark_frame_drawn(&layer_id, frame);
                         if let Some((lx, ly)) = local_pos {
                             let (wx, wy) = pointer_to_world(lx, ly, panel_w, panel_h, &self.state.viewport);
-                            let settings = self.state.active_brush().clone();
+                            let mut settings = self.state.active_brush().clone();
+                            settings.size *= self.current_pressure;
                             let is_eraser = self.state.selected_tool == Tool::Eraser;
                             self.canvas.draw_segment_to_tiles(&layer_id, frame, (wx, wy), (wx, wy), &settings, is_eraser);
                             self.last_paint_pos = Some((wx, wy));
@@ -406,7 +411,8 @@ impl MugenCanvasApp {
                         if let Some(last) = self.last_paint_pos {
                             let layer_id = self.state.selected_layer_id.clone();
                             let frame = self.state.current_frame;
-                            let settings = self.state.active_brush().clone();
+                            let mut settings = self.state.active_brush().clone();
+                            settings.size *= self.current_pressure;
                             let is_eraser = self.state.selected_tool == Tool::Eraser;
                             self.canvas.draw_segment_to_tiles(&layer_id, frame, last, (wx, wy), &settings, is_eraser);
                             self.last_paint_pos = Some((wx, wy));
@@ -706,6 +712,23 @@ fn setup_fonts(ctx: &egui::Context) {
 // ─── eframe::App impl ─────────────────────────────────────────────────────────
 
 impl eframe::App for MugenCanvasApp {
+    // Capture stylus/touch pressure from winit Touch events before egui processes them.
+    // force is None when using a regular mouse; defaults to 1.0 in that case.
+    fn raw_input_hook(&mut self, _ctx: &Context, raw_input: &mut egui::RawInput) {
+        for event in &raw_input.events {
+            if let egui::Event::Touch { force, phase, .. } = event {
+                match phase {
+                    egui::TouchPhase::Start | egui::TouchPhase::Move => {
+                        self.current_pressure = force.unwrap_or(1.0).clamp(0.01, 1.0);
+                    }
+                    egui::TouchPhase::End | egui::TouchPhase::Cancel => {
+                        self.current_pressure = 1.0;
+                    }
+                }
+            }
+        }
+    }
+
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         // Handle playback timer
         self.handle_playback(ctx);
