@@ -19,7 +19,11 @@
 curl -fsSL https://raw.githubusercontent.com/dikmri/mugenCanvas/main/install.sh | sh
 ```
 
-`~/.local/bin/mugen-canvas` にインストールされます。`curl` がない場合は `wget` でも動作します。インストール後は `mugen-canvas` コマンドで起動できます（PATH が通っていない場合はスクリプトが案内します）。
+コマンド実行後、追加の設定は不要です:
+
+- **アプリランチャー** (GNOME / KDE 等) に即座に登録されるのですぐ起動できます
+- `~/.local/bin` への PATH 追記も自動で行われます（次回ターミナル起動から `mugen-canvas` コマンドも使用可）
+- `curl` がない環境では `wget` でも動作します
 
 ---
 

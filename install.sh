@@ -4,6 +4,7 @@ set -e
 REPO="dikmri/mugenCanvas"
 BINARY="mugen-canvas"
 INSTALL_DIR="${HOME}/.local/bin"
+DESKTOP_DIR="${HOME}/.local/share/applications"
 
 echo "mugenCanvas インストーラー"
 echo "--------------------------"
@@ -19,20 +20,20 @@ case "$ARCH" in
         ;;
 esac
 
-# インストール先ディレクトリを作成
+# ディレクトリ作成
 mkdir -p "$INSTALL_DIR"
+mkdir -p "$DESKTOP_DIR"
 
-# 最新リリースの URL を組み立てる
+# ダウンロード
 URL="https://github.com/${REPO}/releases/latest/download/${ASSET}"
 DEST="${INSTALL_DIR}/${BINARY}"
 
-echo "ダウンロード中: $URL"
+echo "ダウンロード中..."
 
-# curl または wget でダウンロード
 if command -v curl >/dev/null 2>&1; then
     curl -fsSL "$URL" -o "$DEST"
 elif command -v wget >/dev/null 2>&1; then
-    wget -q "$URL" -O "$DEST"
+    wget -q --show-progress "$URL" -O "$DEST"
 else
     echo "エラー: curl または wget が必要です" >&2
     exit 1
@@ -40,22 +41,34 @@ fi
 
 chmod +x "$DEST"
 
+# アプリランチャー用 .desktop ファイルを作成
+cat > "${DESKTOP_DIR}/mugen-canvas.desktop" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=mugenCanvas
+Comment=アニメーション制作アプリ
+Exec=${DEST}
+Icon=applications-graphics
+Categories=Graphics;2DGraphics;
+Terminal=false
+DESKTOP
+
+# デスクトップデータベース更新（コマンドがあれば）
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
+fi
+
+# ~/.local/bin を PATH に自動追記（まだ含まれていない場合）
+PATH_LINE='export PATH="$HOME/.local/bin:$PATH"'
+for RC in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile"; do
+    if [ -f "$RC" ] && ! grep -qF '.local/bin' "$RC"; then
+        echo "$PATH_LINE" >> "$RC"
+    fi
+done
+
 echo ""
 echo "インストール完了: $DEST"
-
-# PATH に含まれているか確認
-case ":${PATH}:" in
-    *":${INSTALL_DIR}:"*)
-        echo "起動するには: mugen-canvas"
-        ;;
-    *)
-        echo ""
-        echo "注意: ${INSTALL_DIR} が PATH に含まれていません。"
-        echo "以下の行を ~/.bashrc または ~/.zshrc に追加してください:"
-        echo ""
-        echo '  export PATH="$HOME/.local/bin:$PATH"'
-        echo ""
-        echo "追加後: source ~/.bashrc (または ~/.zshrc) を実行してから"
-        echo "起動するには: mugen-canvas"
-        ;;
-esac
+echo ""
+echo "起動方法:"
+echo "  アプリランチャー (GNOME / KDE 等) で「mugenCanvas」を検索"
+echo "  または新しいターミナルを開いて: mugen-canvas"
