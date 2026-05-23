@@ -1,6 +1,6 @@
 [package]
 name = "mugen-canvas"
-version = "0.6.2"
+version = "0.6.3"
 description = "mugenCanvas - Infinite canvas animation app"
 edition = "2021"
 
@@ -31,6 +31,5 @@ incremental = true
 codegen-units = 1
 lto = true
 opt-level = "s"
-# strip = false (デフォルト) にして関数名・行番号をバイナリに残す
-# → クラッシュログのスタックトレースが読める状態になる
-debug = 1
+# シンボル名はデフォルトで残るためクラッシュログの関数名トレースは維持される
+# debug = 1 は Linux でバイナリに DWARF を埋め込み 67MB まで肥大化するため削除

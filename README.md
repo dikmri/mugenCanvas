@@ -13,6 +13,14 @@
 
 → [全リリース一覧](https://github.com/dikmri/mugenCanvas/releases)
 
+### Linux — ワンコマンドインストール
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/dikmri/mugenCanvas/main/install.sh | sh
+```
+
+`~/.local/bin/mugen-canvas` にインストールされます。`curl` がない場合は `wget` でも動作します。インストール後は `mugen-canvas` コマンドで起動できます（PATH が通っていない場合はスクリプトが案内します）。
+
 ---
 
 ## 操作手順
