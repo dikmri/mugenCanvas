@@ -2,7 +2,32 @@
 
 アニメーション制作用デスクトップアプリ。Rust + eframe (egui + wgpu + winit) で構築。
 
-## ダウンロード
+## インストール
+
+### Windows
+
+PowerShell で以下を実行:
+
+```powershell
+irm https://raw.githubusercontent.com/dikmri/mugenCanvas/main/install.ps1 | iex
+```
+
+スタートメニューへの登録と PATH 追加を自動で行います。完了後、スタートメニューで「mugenCanvas」を検索して起動できます。
+
+### macOS / Linux
+
+ターミナルで以下を実行:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/dikmri/mugenCanvas/main/install.sh | sh
+```
+
+- Apple Silicon / Intel Mac / Linux x86_64 を自動判定してダウンロードします
+- `~/.local/bin` にインストールし、シェル設定ファイルへの PATH 追記を自動で行います
+- Linux では GNOME / KDE などのアプリランチャーにも即座に登録されます
+- `curl` がない環境では `wget` でも動作します
+
+### 手動ダウンロード
 
 | プラットフォーム | ダウンロード |
 |---|---|
@@ -12,18 +37,6 @@
 | Linux (x86_64) | [mugen-canvas-linux-x86_64](https://github.com/dikmri/mugenCanvas/releases/latest/download/mugen-canvas-linux-x86_64) |
 
 → [全リリース一覧](https://github.com/dikmri/mugenCanvas/releases)
-
-### Linux — ワンコマンドインストール
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/dikmri/mugenCanvas/main/install.sh | sh
-```
-
-コマンド実行後、追加の設定は不要です:
-
-- **アプリランチャー** (GNOME / KDE 等) に即座に登録されるのですぐ起動できます
-- `~/.local/bin` への PATH 追記も自動で行われます（次回ターミナル起動から `mugen-canvas` コマンドも使用可）
-- `curl` がない環境では `wget` でも動作します
 
 ---
 
